@@ -10,11 +10,10 @@ gen = galois.Poly([1,0,0,0,0,1,1,0,1,1,1,0,1,1,1], x)
 codeword = msg * gen
 codeword.coeffs
 cf = codeword.coeffs.copy()
-cf
-cf[5]
-cf[5] = 0
-r = galois.Poly(cf)
+r = galois.Poly(cf, x)
 r.coeffs
+r.coeffs == codeword.coeffs
+r.coeffs[1] = 0
 
 
 t = 2
@@ -35,19 +34,21 @@ for v in range(t, 0, -1):
 
     print(np.linalg.det(x(m)))
 
+    
+
     if np.linalg.det(x(m)) != 0:
         svs = x([[x] for x in syndromes[v:2*v]])
         svs
         np.linalg.inv(x(m))
         locs = np.linalg.inv(x(m)) @ x(svs)
         locs
-        p = galois.Poly.Integer(77, x)
-        p.coeffs
+        p = np.reciprocal(locs)
+        p
         break
 
 syndromes
 
-x.display('poly')
+x.display('power')
 x.Elements()
 
 
