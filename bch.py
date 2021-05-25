@@ -1,56 +1,85 @@
 import numpy as np 
 import galois
 
-x = galois.GF(2**7, galois.Poly([1, 0, 0, 0, 1, 0, 0, 1], galois.GF(2)))
+class BCH():
+    
+    def __init__(self, order: int, irreducible: galois.Poly, generator: list, t) -> None:
+        self.field = galois.GF(2**order, irreducible)
+        self.order = order
+        self.field.display('power')
+        self.generator = galois.Poly(generator, self.field)
+        #t is the error-correcting capacity of the code
+        self.t = t
 
+    def encode(self, data: list) -> list:
 
-msg = galois.Poly(np.random.randint(2, size=113), x)
+        msg = galois.Poly(data, self.field)
+        codeword: galois.Poly = self.generator * msg
 
-gen = galois.Poly([1,0,0,0,0,1,1,0,1,1,1,0,1,1,1], x)
-codeword = msg * gen
-codeword.coeffs
-cf = codeword.coeffs.copy()
-r = galois.Poly(cf, x)
-r.coeffs
-r.coeffs == codeword.coeffs
-r.coeffs[1] = 0
+        encoded = [int(b) for b in codeword.coeffs]
+        padded = [0]*(127-len(encoded)) + encoded
+        return padded
 
+    def correct(self, data: list) -> list:
+        received = galois.Poly(data, self.field)
 
-t = 2
+        syndromes = []
 
-syndromes = []
+        for i in range(2*self.t):
+            syndromes.append(received(self.generator.roots()[0]**(i+1)))
 
-for i in range(2*t):
-    syndromes.append(r(gen.roots()[0]**(i+1)))
-syndromes
+        for v in range(self.t, 0, -1):
+            m = []
 
-for v in range(t, 0, -1):
-    m = []
+            #galois.log.log_naive
 
-    print(v)
+            for i in range(v):
+                m.append(syndromes[i:v+i])
 
-    for i in range(v):
-        m.append(syndromes[i:v+i])
+            if np.linalg.det(self.field(m)) != 0:
+                svs = self.field([[x] for x in syndromes[v:2*v]])
 
-    print(np.linalg.det(x(m)))
+                loc_coeffs = np.linalg.inv(self.field(m)) @ self.field(svs)
+                print(loc_coeffs.flatten())
+                positions = galois.Poly([*loc_coeffs.flatten(), 1], self.field).roots()
+                for p in positions:
+                    i = -1
+                    temp = p
+                    while temp != 1:
+                        temp = temp/self.field.primitive_element
+                        i += 1
+                    
+                    data[i] = 1 if data[i] == 0 else 0
 
+                #print(self.field.)
+
+                #for loc in p:
+                #   print(loc[0])
+                return data
+
+    def decode(self, data: list) -> list:
+        datapoly = galois.Poly(data, self.field)
+        decoded_poly = datapoly/self.generator
+
+        decoded_data = [int(b) for b in decoded_poly.coeffs]
+        padded = [0]*(113-len(decoded_data)) + decoded_data
+        return padded
     
 
-    if np.linalg.det(x(m)) != 0:
-        svs = x([[x] for x in syndromes[v:2*v]])
-        svs
-        np.linalg.inv(x(m))
-        locs = np.linalg.inv(x(m)) @ x(svs)
-        locs
-        p = np.reciprocal(locs)
-        p
-        break
+if __name__ == '__main__':
+    bch127 = BCH(7, galois.Poly([1, 0, 0, 0, 1, 0, 0, 1], galois.GF(2)), [1,0,0,0,0,1,1,0,1,1,1,0,1,1,1], 2)
 
-syndromes
+    msg = np.random.randint(2, size=113)
+    codeword = bch127.encode(msg)
+    modified = codeword.copy()
+    print(codeword)
+    modified[17] = 1 if modified[17] == 0 else 0
+    #codeword[30] = 1 if codeword[30] == 0 else 0
 
-x.display('power')
-x.Elements()
-
-
-
-p = galois.Poly([1, 1, 1, 1, 1, 2, 1, 1, 0, 1, 1, 0], field=x)
+    corrected = bch127.correct(modified)
+    #print(modified)
+    #print(len(bch127.correct(modified)))
+    decoded = bch127.decode(corrected)
+    print(len(decoded))
+    #decoded[0] = 1 if decoded[0] == 0 else 0
+    print(decoded == msg)
