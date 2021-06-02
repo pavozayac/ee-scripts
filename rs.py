@@ -255,10 +255,10 @@ if __name__ == '__main__':
     original_encoded = rs7_3.encode(msg)
     encoded = original_encoded.copy()
     print('Encoded\n', encoded)
-    encoded[5] = 1 if encoded[5] == 0 else 0
-    #encoded[2] = 1 if encoded[2] == 0 else 0
+    #encoded[5] = 1 if encoded[5] == 0 else 0
+    encoded[2] = 1 if encoded[2] == 0 else 0
     #encoded[8] = 1 if encoded[8] == 0 else 0
-    encoded[18] = 1 if encoded[18] == 0 else 0
+    #encoded[18] = 1 if encoded[18] == 0 else 0
 
     print('Encoded with errors\n', encoded)
 
