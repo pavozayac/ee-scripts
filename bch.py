@@ -17,7 +17,7 @@ class BCH():
         codeword: galois.Poly = self.generator * msg
 
         encoded = [int(b) for b in codeword.coeffs]
-        padded = [0]*(127-len(encoded)) + encoded
+        padded = [0]*(15-len(encoded)) + encoded
         return padded
 
     def correct(self, data: list) -> list:
@@ -40,7 +40,7 @@ class BCH():
                 svs = self.field([[x] for x in syndromes[v:2*v]])
 
                 loc_coeffs = np.linalg.inv(self.field(m)) @ self.field(svs)
-                print(loc_coeffs.flatten())
+                #print(loc_coeffs.flatten())
                 positions = galois.Poly([*loc_coeffs.flatten(), 1], self.field).roots()
                 for p in positions:
                     i = -1
@@ -56,30 +56,50 @@ class BCH():
                 #for loc in p:
                 #   print(loc[0])
                 return data
+            return data
 
     def decode(self, data: list) -> list:
         datapoly = galois.Poly(data, self.field)
         decoded_poly = datapoly/self.generator
 
         decoded_data = [int(b) for b in decoded_poly.coeffs]
-        padded = [0]*(113-len(decoded_data)) + decoded_data
+        padded = [0]*(7-len(decoded_data)) + decoded_data
         return padded
-    
+
+def bch15_7():
+    return BCH(4, galois.Poly([1, 0, 0, 1, 1], galois.GF(2)), [1,1,1,0,1,0,0,0,1], 2)
 
 if __name__ == '__main__':
-    bch127 = BCH(7, galois.Poly([1, 0, 0, 0, 1, 0, 0, 1], galois.GF(2)), [1,0,0,0,0,1,1,0,1,1,1,0,1,1,1], 2)
+    bch15_7 = BCH(4, galois.Poly([1, 0, 0, 1, 1], galois.GF(2)), [1,1,1,0,1,0,0,0,1], 2)
 
-    msg = np.random.randint(2, size=113)
-    codeword = bch127.encode(msg)
-    modified = codeword.copy()
-    print(codeword)
-    modified[17] = 1 if modified[17] == 0 else 0
-    #codeword[30] = 1 if codeword[30] == 0 else 0
+    true = 0
+    total = 0
 
-    corrected = bch127.correct(modified)
-    #print(modified)
-    #print(len(bch127.correct(modified)))
-    decoded = bch127.decode(corrected)
-    print(len(decoded))
-    #decoded[0] = 1 if decoded[0] == 0 else 0
-    print(decoded == msg)
+    for i in range(0,15):
+        for j in range(0,15):
+
+            if i == j:
+                continue
+
+            total += 1
+
+
+            msg = np.random.randint(2, size=7)
+            codeword = bch15_7.encode(msg)
+            modified = codeword.copy()
+            print(codeword)
+            modified[i] = 1 if modified[i] == 0 else 0
+            modified[j] = 1 if modified[j] == 0 else 0
+            #codeword[30] = 1 if codeword[30] == 0 else 0
+
+            corrected = bch15_7.correct(modified)
+            #print(modified)
+            #print(len(bch127.correct(modified)))
+            decoded = bch15_7.decode(corrected)
+            #print(len(decoded))
+            #decoded[0] = 1 if decoded[0] == 0 else 0
+            #print(decoded == msg)
+            if all(decoded == msg):
+                true += 1
+
+    print(true, total)
