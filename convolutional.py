@@ -1,10 +1,31 @@
+from typing import Callable, List
+
 def push_shift(num: int, arr: list):
     for i in range(len(arr)-1, 0, -1):
         arr[i] = arr[i-1]
     arr[0] = num
 
 class ConvCode:
-    trellis = {}
+    trellis: dict
+    register_size: int
+    output_size: int
+    register: list
+    gates: Callable[[List[int]], List[int]]
+
+    
+    def __init__(self, gates, reg_size = 3, out_size = 2, ):
+        self.trellis = {}
+        self.reg_size = reg_size
+        self.out_size = out_size
+        self.gates = gates
+        self.register = [0]*reg_size
+
+    def push_reg(self, bit: int):
+        output = self.gates(self.register)
+        self.register.pop(0)
+        self.register.append(bit)
+
+        return output
 
     def generate_trellis(self):
 

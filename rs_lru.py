@@ -7,6 +7,7 @@ from numpy.core.defchararray import decode, encode, index
 from numpy.core.function_base import logspace
 from numpy.lib.polynomial import polydiv
 from scipy.sparse.construct import rand
+from functools import lru_cache
 
 class RS():
     
@@ -26,6 +27,7 @@ class RS():
         #print(self.generator)
         #t is the error-correcting capacity of the code
 
+    @lru_cache(maxsize=None)
     def encode(self, data: tuple) -> list:
         data = list(data)
 
@@ -68,6 +70,7 @@ class RS():
         return padded
 
         '''
+    @lru_cache(maxsize=None)
     def correct(self, data: tuple) -> list:
         data = list(data)
 
