@@ -2,20 +2,13 @@ from math import sqrt
 from random import uniform
 from numpy.lib.function_base import average
 from scipy.interpolate import BSpline, make_interp_spline
-
+from box_muller import box_muller
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 import sys
 import csv
-
-def box_muller() -> float:
-       u1 = np.random.uniform()
-       u2 = np.random.uniform()
-
-       return np.sqrt(-2*np.log(u1))*np.sin(2*np.pi*u2)
-
 
 def chunks(lst: list, n: int):
        for i in range(0, len(lst), n):

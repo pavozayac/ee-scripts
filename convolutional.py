@@ -4,10 +4,15 @@ from itertools import product
 import numpy as np
 from numpy.core.numeric import Infinity
 from numpy.lib.function_base import append
+from numpy.lib.function_base import average
+import time
+from box_muller import box_muller
+from math import sqrt
+import csv
 
 def chunks(lst: list, n: int):
        for i in range(0, len(lst), n):
-              yield lst[i:i + n]
+            yield lst[i:i + n]
 
 
 def push_shift(next: bool, arr: List[bool]):
@@ -63,21 +68,19 @@ class ConvCode:
                 }
 
 
-    def encode(self, bits: List[int]) -> List[int]:
+    def encode(self, bits: List[bool]) -> List[bool]:
         self.register = [False]*self.reg_size
 
-        boolean_bits = map(lambda x: bool(x), bits)
         output: List[int] = []
 
-        for bit in boolean_bits:
-            output += map(lambda x: int(x), self.push_reg(bit))
+        for bit in bits:
+            output += self.push_reg(bit)
 
 
         return output
 
-    def decode(self, bits: List[int]):
-        boolean_bits = list(map(lambda x: bool(x), bits))
-        grouped_bits = chunks(boolean_bits, self.out_size)
+    def decode(self, bits: List[bool]):
+        grouped_bits = chunks(bits, self.out_size)
 
         #   The nodes is a list of time arranged lists of all possible states of the register with assigned cumulative weights
         nodes = []
@@ -152,39 +155,61 @@ def half_gates(input: List[bool]):
     return [input[0] ^ input[1] ^ input[2], input[2]]
 
 if __name__ == '__main__':
-    b = ConvCode(half_gates, reg_size=3, out_size=2)
 
-    print(b.trellis)
+    gates = []
+        
+    conv_code = ConvCode(half_gates)
 
-    test = np.random.randint(0, 2, 10000, int)
+    BITS = 10000 * 100
 
-    encoded = b.encode(test)
+    snr_in_db_range = np.arange(0, 9, 0.5)
 
-    print(len(encoded))
+    bers = []
 
-    decoded = b.decode(encoded)
+    start = time.time()
 
-    print(len(decoded))
+    for index in range(len(snr_in_db_range)):
+            local_bers = []
 
-    def check_equivalence(a: list, b: list):
-        ind = 0
+            snr_in_db = snr_in_db_range[index]
 
-     
-        c = []
+            snr_linear = 10**(snr_in_db/10)
 
-        for index, (x, y) in enumerate(zip(a, b)):
-            if x != y:
-                c.append(1)
-                ind = index
-            else:
-                c.append(0)
+            noise_spectral_dens = 1/snr_linear
+
+            for i in range(10):
+                    
+                    
+                    uncoded = np.random.randint(0, 2, BITS, bool)
+
+                    msg = conv_code.encode(uncoded)
+
+                    signal = 1 - 2*np.asarray(msg)
+
+                    print('n0', noise_spectral_dens)
+
+                    randoms = [box_muller() for _ in range(len(msg))]
+
+                    noise = sqrt(noise_spectral_dens/2)*np.asarray(randoms)
+
+                    received = signal + noise
+
+                    demodulated = [1 if r < 0 else 0 for r in received]
+                    
+                    decoded = []
+
+                    
+                    decoded = conv_code.decode(demodulated)
+
+                    n_errors = sum(decoded != uncoded)
+                    ber = n_errors/BITS
+                    local_bers.append(ber)
 
 
-        return sum(c), ind
-
-    print(check_equivalence(test, decoded))
-
-
-{(False, False, False): {False: {'next_state': (False, False, False), 'output': [False, False]}, True: {'next_state': (False, False, True), 'output': [False, False]}}, (False, False, True): {False: {'next_state': (False, True, False), 'output': [True, True]}, True: {'next_state': (False, True, True), 'output': [True, True]}}, (False, True, False): {False: {'next_state': (True, False, False), 'output': [True, False]}, True: {'next_state': (True, False, True), 'output': [True, False]}}, (False, True, True): {False: {'next_state': (True, True, False), 'output': [False, True]}, True: {'next_state': (True, True, True), 'output': [False, True]}}, (True, False, False): {False: {'next_state': (False, False, False), 'output': [True, False]}, True: {'next_state': (False, False, True), 'output': 
-[True, False]}}, (True, False, True): {False: {'next_state': (False, True, False), 'output': [False, True]}, True: {'next_state': (False, True, True), 'output': [False, True]}}, (True, True, False): 
-{False: {'next_state': (True, False, False), 'output': [False, False]}, True: {'next_state': (True, False, True), 'output': [False, False]}}, (True, True, True): {False: {'next_state': (True, True, False), 'output': [True, True]}, True: {'next_state': (True, True, True), 'output': [True, True]}}}
+            bers.append(average(local_bers))
+    end = time.time()
+    print('Elapsed: ', end - start)
+    
+    with open('convolutional.csv', mode='w') as file:
+            writer = csv.writer(file)
+            writer.writerows(map(lambda x: [x], bers))
