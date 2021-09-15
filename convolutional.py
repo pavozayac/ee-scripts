@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Callable, Dict, List
 from itertools import product
 import numpy as np
@@ -9,6 +10,7 @@ import time
 from box_muller import box_muller
 from math import sqrt
 import csv
+import datetime
 
 def chunks(lst: list, n: int):
        for i in range(0, len(lst), n):
@@ -54,8 +56,12 @@ class ConvCode:
     def fill_trellis(self):
         posregs = product([False, True], repeat=self.reg_size)
 
+        previous_to_fill = []
+
         for reg in posregs:
             self.trellis[reg] = {}
+            self.trellis[reg]['previous_state'] = []
+            self.trellis[reg]['bit_to_state'] = reg[-1]
 
             for next_bit in [False, True]:
                 self.register = list(reg).copy()
@@ -66,6 +72,16 @@ class ConvCode:
                     'next_state': tuple(self.register),
                     'output': output
                 }
+
+                previous_to_fill.append({
+                    'state': tuple(self.register),
+                    'previous_bit': next_bit,
+                    'previous_state': reg
+                })
+
+        for previous in previous_to_fill:
+            self.trellis[previous['state']]['previous_state'].append(previous['previous_state'])
+
 
 
     def encode(self, bits: List[bool]) -> List[bool]:
@@ -121,8 +137,8 @@ class ConvCode:
 
             nodes.append(next_timeslot)
 
-        with open('./nodes.txt', 'w') as file:
-            file.write(str(nodes))
+        # with open('./nodes.txt', 'w') as file:
+        #     file.write(str(nodes))
 
         #   Backtracking the path with the lowest weight (NOTE: the survivor path)
 
@@ -135,9 +151,9 @@ class ConvCode:
             if node['weight'] < survivor_end['weight']:
                 survivor_end = node
 
-        print(nodes[-1])
+        #print(nodes[-1])
 
-        print(survivor_end)
+        # print(survivor_end)
 
         reversed_decoded: List[bool] = []
 
@@ -155,61 +171,67 @@ def half_gates(input: List[bool]):
     return [input[0] ^ input[1] ^ input[2], input[2]]
 
 if __name__ == '__main__':
+    if sys.argv[1] == 'channel':
 
-    gates = []
+        gates = []
+            
+        conv_code = ConvCode(half_gates)
+
+        BITS = 10000 * 100
+
+        snr_in_db_range = np.arange(0, 9, 0.5)
+
+        bers = []
+
+        start = time.time()
+
+        for index in range(len(snr_in_db_range)):
+                local_bers = []
+
+                snr_in_db = snr_in_db_range[index]
+
+                snr_linear = 10**(snr_in_db/10)
+
+                noise_spectral_dens = 1/snr_linear
+
+                for i in range(10):
+                        
+                        
+                        uncoded = np.random.randint(0, 2, BITS, bool)
+
+                        msg = conv_code.encode(uncoded)
+
+                        signal = 1 - 2*np.asarray(msg)
+
+                        print('n0', noise_spectral_dens)
+
+                        randoms = [box_muller() for _ in range(len(msg))]
+
+                        noise = sqrt(noise_spectral_dens/2)*np.asarray(randoms)
+
+                        received = signal + noise
+
+                        demodulated = [1 if r < 0 else 0 for r in received]
+                        
+                        decoded = []
+
+                        
+                        decoded = conv_code.decode(demodulated)
+
+                        n_errors = sum(decoded != uncoded)
+                        ber = n_errors/BITS
+                        local_bers.append(ber)
+
+
+                bers.append(average(local_bers))
+        end = time.time()
+        print('Elapsed: ', end - start)
         
-    conv_code = ConvCode(half_gates)
-
-    BITS = 10000 * 100
-
-    snr_in_db_range = np.arange(0, 9, 0.5)
-
-    bers = []
-
-    start = time.time()
-
-    for index in range(len(snr_in_db_range)):
-            local_bers = []
-
-            snr_in_db = snr_in_db_range[index]
-
-            snr_linear = 10**(snr_in_db/10)
-
-            noise_spectral_dens = 1/snr_linear
-
-            for i in range(10):
-                    
-                    
-                    uncoded = np.random.randint(0, 2, BITS, bool)
-
-                    msg = conv_code.encode(uncoded)
-
-                    signal = 1 - 2*np.asarray(msg)
-
-                    print('n0', noise_spectral_dens)
-
-                    randoms = [box_muller() for _ in range(len(msg))]
-
-                    noise = sqrt(noise_spectral_dens/2)*np.asarray(randoms)
-
-                    received = signal + noise
-
-                    demodulated = [1 if r < 0 else 0 for r in received]
-                    
-                    decoded = []
-
-                    
-                    decoded = conv_code.decode(demodulated)
-
-                    n_errors = sum(decoded != uncoded)
-                    ber = n_errors/BITS
-                    local_bers.append(ber)
-
-
-            bers.append(average(local_bers))
-    end = time.time()
-    print('Elapsed: ', end - start)
+        with open(f'convolutional-{datetime.datetime.now()}.csv', mode='w') as file:
+                writer = csv.writer(file)
+                writer.writerows(map(lambda x: [x], bers))
     
-    with open('convolutional.csv', mode='w') as file:
-            writer = csv.writer(file)
-            writer.writerows(map(lambda x: [x], bers))
+    elif sys.argv[1] == 'trellis':
+        code = ConvCode(half_gates, 3, 2)
+
+        print(code.trellis)

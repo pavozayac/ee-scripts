@@ -13,7 +13,7 @@ class Interleaver:
             s.remove(choice)
             self.indices.append(choice)
 
-    def interleave(self, sequence: List[bool]) -> List[bool]:
+    def interleave(self, sequence: list) -> list:
         output = []
 
         for index in self.indices:
@@ -21,7 +21,7 @@ class Interleaver:
 
         return output
 
-    def deinterleave(self, sequence: List[bool]) -> List[bool]:
+    def deinterleave(self, sequence: list) -> list:
         output = [None]*self.size
 
         for number, index in enumerate(self.indices):
