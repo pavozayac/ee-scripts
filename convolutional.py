@@ -10,7 +10,8 @@ import time
 from box_muller import box_muller
 from math import sqrt
 import csv
-import datetime
+import time
+import json
 
 def chunks(lst: list, n: int):
        for i in range(0, len(lst), n):
@@ -171,7 +172,8 @@ def half_gates(input: List[bool]):
     return [input[0] ^ input[1] ^ input[2], input[2]]
 
 if __name__ == '__main__':
-    if sys.argv[1] == 'channel':
+    if sys.argv[1] == 'simulation':
+        simulation_data = {}
 
         gates = []
             
@@ -186,50 +188,60 @@ if __name__ == '__main__':
         start = time.time()
 
         for index in range(len(snr_in_db_range)):
-                local_bers = []
+            local_bers = []
 
-                snr_in_db = snr_in_db_range[index]
+            snr_in_db = snr_in_db_range[index]
 
-                snr_linear = 10**(snr_in_db/10)
+            simulation_data[snr_in_db] = {}
 
-                noise_spectral_dens = 1/snr_linear
+            snr_linear = 10**(snr_in_db/10)
 
-                for i in range(10):
-                        
-                        
-                        uncoded = np.random.randint(0, 2, BITS, bool)
+            noise_spectral_dens = 1/snr_linear
 
-                        msg = conv_code.encode(uncoded)
+            for i in range(10):
+                simulation_data[snr_in_db][i] = {}
+                
+                uncoded = np.random.randint(0, 2, BITS, bool)
 
-                        signal = 1 - 2*np.asarray(msg)
+                msg = conv_code.encode(uncoded)
 
-                        print('n0', noise_spectral_dens)
+                signal = 1 - 2*np.asarray(msg)
 
-                        randoms = [box_muller() for _ in range(len(msg))]
+                print('n0', noise_spectral_dens)
 
-                        noise = sqrt(noise_spectral_dens/2)*np.asarray(randoms)
+                randoms = [box_muller() for _ in range(len(msg))]
 
-                        received = signal + noise
+                noise = sqrt(noise_spectral_dens/2)*np.asarray(randoms)
 
-                        demodulated = [1 if r < 0 else 0 for r in received]
-                        
-                        decoded = []
+                received = signal + noise
 
-                        
-                        decoded = conv_code.decode(demodulated)
+                demodulated = [1 if r < 0 else 0 for r in received]
+                
+                decoded = []                
+                decoded = conv_code.decode(demodulated)
 
-                        n_errors = sum(decoded != uncoded)
-                        ber = n_errors/BITS
-                        local_bers.append(ber)
+                n_errors = sum(decoded != uncoded)
+                ber = n_errors/BITS
+
+                simulation_data[snr_in_db][i]['number_of_errors'] = int(n_errors)
+                simulation_data[snr_in_db][i]['bit_error_rate'] = float(ber)
+
+                local_bers.append(ber)
 
 
-                bers.append(average(local_bers))
+            bers.append(average(local_bers))
         end = time.time()
         print('Elapsed: ', end - start)
         
-        with open(f'convolutional-{datetime.datetime.now()}.csv', mode='w') as file:
+        if not os.path.exists('convolutional'):
+            os.makedirs('convolutional')
+
+        with open(f'convolutional/convolutional_aggregated_bers_{end}.csv', mode='w') as file:
                 writer = csv.writer(file)
                 writer.writerows(map(lambda x: [x], bers))
+
+        with open(f'convolutional/convolutional_raw_data_{end}.json', mode='w') as file:
+            json.dump(simulation_data, file)
     
     elif sys.argv[1] == 'trellis':
         code = ConvCode(half_gates, 3, 2)

@@ -1,12 +1,11 @@
 from math import log2
-from galois.field.conway import conway_poly
-from galois.field.poly_functions import primitive_element
+from galois import conway_poly
+#from galois.field.poly_functions import primitive_element
 import numpy as np 
 import galois
 from numpy.core.defchararray import decode, encode, index
 from numpy.core.function_base import logspace
 from numpy.lib.polynomial import polydiv
-from scipy.sparse.construct import rand
 from functools import lru_cache
 
 class RS():
@@ -174,32 +173,96 @@ class RS():
         return data[0:9][::-1]
     
 
+from utils import chunks
+from box_muller import box_muller
+import sys
+import time
+import csv
+import json
+import os
+
 if __name__ == '__main__':
 
-    rs7_3 = RS(7, 3)
+    simulation_data = {}
 
-    #msg = np.random.randint(2, size=9)
+    rs_code = RS(7,3)
 
-    msg =  np.random.randint(0, 2, 9)
-    original_encoded = rs7_3.encode(msg)
-    encoded = original_encoded.copy()
-    print(f'Encoded {len(encoded)}\n', encoded)
+    RS_BITS = int(1000000 - 1000000%7)
 
-    encoded[5] = 1 if encoded[5] == 0 else 0
-    encoded[2] = 1 if encoded[2] == 0 else 0
-    #encoded[8] = 1 if encoded[8] == 0 else 0
-    #encoded[18] = 1 if encoded[18] == 0 else 0
+    snr_in_db_range = np.arange(0, 9, 0.5)
 
-    print('Encoded with errors\n', encoded)
+    rs_bers = []
 
-    corrected = rs7_3.correct(encoded)
+    start = time.time()
 
-    print('corrected', corrected)
+    for index in range(len(snr_in_db_range)):
+        local_bers = []
 
-    decoded = rs7_3.decode(corrected)
+        snr_in_db = snr_in_db_range[index]
 
-    print(corrected)
-    print(corrected == original_encoded)
-    print(msg)
-    print(decoded)
-    print(decoded == msg)
+        simulation_data[snr_in_db] = {}
+
+        snr_linear = 10**(snr_in_db/10)
+
+        noise_spectral_dens = 1/snr_linear
+
+        for i in range(10):
+            simulation_data[snr_in_db][i] = {}
+
+            uncoded = np.random.randint(0, 2, RS_BITS, int)
+
+            simulation_data[snr_in_db][i]['uncoded_message'] = uncoded.tolist()
+
+            msg = []
+
+            for chunk in chunks(uncoded, 9):
+                    msg += rs_code.encode(tuple(chunk))
+
+            simulation_data[snr_in_db][i]['encoded_message'] = msg
+
+            signal = 1 - 2*np.asarray(msg)
+
+            print('n0', noise_spectral_dens)
+
+            randoms = [box_muller() for _ in range(len(msg))]
+
+            noise = np.sqrt(noise_spectral_dens/2)*np.asarray(randoms)
+
+            received = signal + noise
+
+            demodulated = [1 if r < 0 else 0 for r in received]
+
+            simulation_data[snr_in_db][i]['demodulated_message'] = demodulated
+            
+            decoded = []
+
+            for dem_chunk in chunks(demodulated, 21):
+                    decoded += rs_code.decode(tuple(rs_code.correct(tuple(dem_chunk))))
+
+            simulation_data[snr_in_db][i]['decoded_message'] = decoded
+
+            n_errors = sum(decoded != uncoded)
+            ber = n_errors/RS_BITS
+
+            simulation_data[snr_in_db][i]['number_of_errors'] = int(n_errors)
+            simulation_data[snr_in_db][i]['bit_error_rate'] = float(ber)
+
+            local_bers.append(ber)
+
+        rs_bers.append(np.average(local_bers))
+
+    print(rs_bers)
+    end = time.time()
+    print('Elapsed: ', end - start)
+
+    if not os.path.exists('rs'):
+        os.makedirs('rs')
+
+    with open(f'rs/rs_aggregated_bers_{end}.csv', mode='w') as file:
+            writer = csv.writer(file)
+            writer.writerows(map(lambda x: [x], rs_bers))
+
+    with open(f'rs/rs_raw_data_{end}.json', mode='w') as file:
+        json.dump(simulation_data, file)
+
+

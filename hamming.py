@@ -70,11 +70,83 @@ def hamming_decode(arr: list):
 
     return [bit for block in output for bit in block]
 
-    
+
+from utils import chunks
+from box_muller import box_muller
+import sys
+import time
+import csv
+import json
+import os
+import numpy as np
+
 if __name__ == '__main__':
-    enc = hamming_encode([1,0,1,1,1,0,0,1,0,0,1,0])
-    enc[0] = 1
-    print(enc)
-    correct = hamming_correct(enc)
-    print(correct)
-    print(hamming_decode(correct))
+
+    HAMMING_BITS = 10000 * 100
+    snr_in_db_range = np.arange(0, 9, 0.5)
+    hamming_bers = []
+
+    simulation_data = {}
+
+
+    start = time.time()
+
+    for index in range(len(snr_in_db_range)):
+        local_bers = []
+
+        snr_in_db = snr_in_db_range[index]
+
+        simulation_data[snr_in_db] = {}
+
+        snr_linear = 10**(snr_in_db/10)
+
+        noise_spectral_dens = 1/snr_linear
+
+        for i in range(10):
+            simulation_data[snr_in_db][i] = {}
+            
+            uncoded = np.random.randint(0, 2, HAMMING_BITS, int)
+
+            #msg = hamming.hamm_encoder(uncoded)
+            msg = hamming_encode(uncoded)
+
+            signal = 1 - 2*np.array(msg)
+
+            print('n0', noise_spectral_dens)
+
+            randoms = [box_muller() for _ in range(len(msg))]
+
+            noise = np.sqrt(noise_spectral_dens/2)*np.asarray(randoms)
+
+            received = signal + noise
+
+            demodulated = [1 if r < 0 else 0 for r in received]
+
+            #decoded = hamming.hamm_decoder(np.asarray(demodulated).astype(int))
+            corrected = hamming_correct(demodulated)
+            decoded = hamming_decode(corrected)
+
+            n_errors = sum(1 if a != b else 0 for a, b in zip(decoded, uncoded))
+            ber = n_errors/HAMMING_BITS
+
+            simulation_data[snr_in_db][i]['number_of_errors'] = int(n_errors)
+            simulation_data[snr_in_db][i]['bit_error_rate'] = float(ber)
+
+            local_bers.append(ber)
+
+        hamming_bers.append(np.average(local_bers))
+
+    print(hamming_bers)
+    end = time.time()
+    print('Elapsed: ', end - start)
+
+
+    if not os.path.exists('hamming'):
+        os.makedirs('hamming')
+
+    with open(f'hamming/hamming_aggregated_bers_{end}.csv', mode='w') as file:
+            writer = csv.writer(file)
+            writer.writerows(map(lambda x: [x], hamming_bers))
+
+    with open(f'hamming/hamming_raw_data_{end}.json', mode='w') as file:
+        json.dump(simulation_data, file)

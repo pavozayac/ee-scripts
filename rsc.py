@@ -9,7 +9,6 @@ import numpy as np
 from numpy.core.numeric import Infinity
 from numpy.lib.function_base import append
 from numpy.lib.function_base import average
-import time
 from box_muller import box_muller
 from math import sqrt
 import csv
@@ -215,125 +214,134 @@ class RSC(ConvCode):
 def gates(register: List[bool]):
     return [register[0] ^ register[1] ^ register[2]]
 
+import json
+import time
+
 if __name__ == '__main__':
-    if sys.argv[1] == RSCDecoder.VITERBI:
+    simulation_data = {}
+    start = 0
+    end = 0
+
+    bers = []
+
+    if sys.argv[1] == 'viterbi':
         rsc = RSC(gates, [1], 3, 2)
 
         BITS = 10000 * 100
 
         snr_in_db_range = np.arange(0, 9, 0.5)
 
-        bers = []
-
         start = time.time()
 
         for index in range(len(snr_in_db_range)):
-                local_bers = []
+            local_bers = []
 
-                snr_in_db = snr_in_db_range[index]
+            snr_in_db = snr_in_db_range[index]
 
-                snr_linear = 10**(snr_in_db/10)
+            simulation_data[snr_in_db] = {}
 
-                noise_spectral_dens = 1/snr_linear
+            snr_linear = 10**(snr_in_db/10)
 
-                for i in range(10):
-                        
-                        
-                        uncoded = np.random.randint(0, 2, BITS, bool)
+            noise_spectral_dens = 1/snr_linear
 
-                        msg = rsc.encode(uncoded)
+            for i in range(10):
+                simulation_data[snr_in_db][i] = {}
+                
+                uncoded = np.random.randint(0, 2, BITS, bool)
 
-                        signal = 1 - 2*np.asarray(msg)
+                msg = rsc.encode(uncoded)
 
-                        print('n0', noise_spectral_dens)
+                signal = 1 - 2*np.asarray(msg)
 
-                        randoms = [box_muller() for _ in range(len(msg))]
+                print('n0', noise_spectral_dens)
 
-                        noise = sqrt(noise_spectral_dens/2)*np.asarray(randoms)
+                randoms = [box_muller() for _ in range(len(msg))]
 
-                        received = signal + noise
+                noise = sqrt(noise_spectral_dens/2)*np.asarray(randoms)
 
-                        demodulated = [1 if r < 0 else 0 for r in received]
-                        
-                        decoded = []
+                received = signal + noise
 
-                        
-                        decoded = rsc.decode(demodulated)
+                demodulated = [1 if r < 0 else 0 for r in received]
+                
+                decoded = []
 
-                        n_errors = sum(decoded != uncoded)
-                        ber = n_errors/BITS
-                        local_bers.append(ber)
+                
+                decoded = rsc.decode(demodulated)
 
+                n_errors = sum(decoded != uncoded)
+                ber = n_errors/BITS
 
-                bers.append(average(local_bers))
+                simulation_data[snr_in_db][i]['number_of_errors'] = int(n_errors)
+                simulation_data[snr_in_db][i]['bit_error_rate'] = float(ber)
+
+                local_bers.append(ber)
+
+            bers.append(average(local_bers))
         end = time.time()
         print('Elapsed: ', end - start)
 
         print(bers)
-        
-        with open(f'rsc-viterbi-{datetime.datetime.utcnow()}.csv', mode='w') as file:
-                writer = csv.writer(file)
-                writer.writerows(map(lambda x: [x], bers))
 
-    elif sys.argv[1] == RSCDecoder.BCJR:
+    elif sys.argv[1] == 'bcjr':
         rsc = RSC(gates, [1], 3, 2)
 
         BITS = 10000 * 100
 
         snr_in_db_range = np.arange(0, 9, 0.5)
 
-        bers = []
-
         start = time.time()
 
         for index in range(len(snr_in_db_range)):
-                local_bers = []
+            local_bers = []
 
-                snr_in_db = snr_in_db_range[index]
+            snr_in_db = snr_in_db_range[index]
 
-                snr_linear = 10**(snr_in_db/10)
+            simulation_data[snr_in_db] = {}
 
-                noise_spectral_dens = 1/snr_linear
+            snr_linear = 10**(snr_in_db/10)
 
-                for i in range(10):
-                        
-                        
-                        uncoded = np.random.randint(0, 2, BITS, bool)
+            noise_spectral_dens = 1/snr_linear
 
-                        msg = rsc.encode(uncoded)
+            for i in range(10):
+                simulation_data[snr_in_db][i] = {}
+                
+                uncoded = np.random.randint(0, 2, BITS, bool)
 
-                        signal = 1 - 2*np.asarray(msg)
+                msg = rsc.encode(uncoded)
 
-                        print('n0', noise_spectral_dens)
+                signal = 1 - 2*np.asarray(msg)
 
-                        randoms = [box_muller() for _ in range(len(msg))]
+                print('n0', noise_spectral_dens)
 
-                        noise = sqrt(noise_spectral_dens/2)*np.asarray(randoms)
+                randoms = [box_muller() for _ in range(len(msg))]
 
-                        received = signal + noise
+                noise = sqrt(noise_spectral_dens/2)*np.asarray(randoms)
 
-                        demodulated = [1 if r < 0 else 0 for r in received]
-                        
-                        decoded = []
+                received = signal + noise
 
-                        
-                        decoded = rsc.decode(demodulated)
+                demodulated = [1 if r < 0 else 0 for r in received]
+                
+                decoded = []
+                
+                decoded = rsc.decode(demodulated)
 
-                        n_errors = sum(decoded != uncoded)
-                        ber = n_errors/BITS
-                        local_bers.append(ber)
+                n_errors = sum(decoded != uncoded)
+                ber = n_errors/BITS
 
+                simulation_data[snr_in_db][i]['number_of_errors'] = int(n_errors)
+                simulation_data[snr_in_db][i]['bit_error_rate'] = float(ber)
 
-                bers.append(average(local_bers))
+                local_bers.append(ber)
+
+            bers.append(average(local_bers))
+
         end = time.time()
         print('Elapsed: ', end - start)
 
         print(bers)
-        
-        with open(f'rsc-viterbi-{datetime.datetime.utcnow()}.csv', mode='w') as file:
-                writer = csv.writer(file)
-                writer.writerows(map(lambda x: [x], bers))
+
     
+
     elif sys.argv[1] == 'trellis':
         rsc = RSC(gates, [1], 3, 2, terminate=False)
 
@@ -359,9 +367,20 @@ if __name__ == '__main__':
 
         def pairwise_compare(a: list, b: list):
             for x, y in zip(a, b):
-                if x != y: return False\
+                if x != y: return False
 
             return True
 
         if pairwise_compare(random_bits, decoded):
             print('We have correct sequence!')
+
+    if sys.argv[1] == 'bcjr' or sys.argv[1] == 'viterbi':
+        if not os.path.exists('rsc'):
+                os.makedirs('rsc')
+
+        with open(f'rsc/rsc_{sys.argv[1]}_aggregated_bers_{end}.csv', mode='w') as file:
+                writer = csv.writer(file)
+                writer.writerows(map(lambda x: [x], bers))
+
+        with open(f'rsc/rsc_{sys.argv[1]}_raw_data_{end}.json', mode='w') as file:
+            json.dump(simulation_data, file)
