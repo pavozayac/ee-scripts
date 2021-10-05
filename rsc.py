@@ -32,8 +32,16 @@ def modulate(a: bool) -> float:
         return [1-2*float(b) for b in a]
 
 #This gamma is defined specifically for BPSK modulation
-def compute_gamma(signal: float, parity: float, prototype_output: List[float], a_priori = 0.5) -> float:
-    return a_priori*np.exp(signal*prototype_output[0] + parity*prototype_output[1])
+def compute_gamma(signal: float, parity: float, prototype_output: List[float], a_priori = 0.5, No = 2) -> float:
+    # print(signal, parity, prototype_output)
+    # return a_priori*np.exp(
+    #     -1*((signal-prototype_output[0])**2 + (parity-prototype_output[1])**2)/2/variance
+    # )
+
+    return 2/No*(prototype_output[0]*signal+prototype_output[1]*parity) + np.log(a_priori)
+
+def max_star(x, y):
+    return max(x, y) + np.log(1 + np.exp(-1*np.abs(y-x)))
 
 
 class RSC(ConvCode):
@@ -93,14 +101,14 @@ class RSC(ConvCode):
             for _ in range(self.reg_size):
                 output += self.push_reg(self.register[self.recursive_indices[0]])
 
-        print(self.register)
+        # print(self.register)
 
         return output
 
     
 
     #takes a list of floating-point numbers and returns the log likelihood ratio, optionally takes a list of previous LLRs
-    def bcjr_decode(self, systematic_sequence: List[float], parity_sequence: List[float], llrs: Optional[List[float]] = None) -> List[float]:
+    def bcjr_decode(self, systematic_sequence: List[float], parity_sequence: List[float], llrs: Optional[List[float]] = None, variance = 1) -> List[float]:
 
         @dataclass
         class TimeslotState():
@@ -167,7 +175,7 @@ class RSC(ConvCode):
                 previous_node_1 = nodes[t-1][previous_registers[0]]
                 previous_node_2 = nodes[t-1][previous_registers[1]]
                 
-                alpha = previous_node_1.alpha*previous_node_1.gamma[bit_to_state] + previous_node_2.alpha*previous_node_2.gamma[bit_to_state]
+                alpha = max_star(previous_node_1.alpha+previous_node_1.gamma[bit_to_state],  previous_node_2.alpha+previous_node_2.gamma[bit_to_state])
 
                 node.alpha = alpha
 
@@ -176,19 +184,22 @@ class RSC(ConvCode):
         # Backward recursion
         t = len(nodes)-2
         for timeslot in nodes[-2::-1]:
+            # print(t)
             for memory, node in timeslot.items():
                 beta = 0
 
                 for bit in [False, True]:
                     next_register = self.trellis[memory][bit]['next_state']
-                    beta += nodes[t+1][next_register].beta*node.gamma[bit]
+                    beta = max_star(nodes[t+1][next_register].beta+node.gamma[bit], beta)
                 
                 node.beta = beta
 
+            t -= 1
         # Computation of Log Likelihood Ratios
         llrs = []
         t = 0
         for timeslot in nodes[:-1]:
+            # max_1 = max_star()
             top = 0 
             bottom = 0
             for memory, node in timeslot.items():
@@ -202,13 +213,13 @@ class RSC(ConvCode):
 
             t += 1
 
-        print(llrs)
+        # print(llrs)
 
-        print(nodes)
+        # print(nodes)
 
         decoded_sequence = [True if llr > 0 else False for llr in llrs]
 
-        return decoded_sequence
+        return decoded_sequence, llrs
 
 
 def gates(register: List[bool]):
@@ -285,7 +296,7 @@ if __name__ == '__main__':
     elif sys.argv[1] == 'bcjr':
         rsc = RSC(gates, [1], 3, 2)
 
-        BITS = 10000 * 100
+        BITS = int(sys.argv[2]) # 10000
 
         snr_in_db_range = np.arange(0, 9, 0.5)
 
@@ -302,7 +313,7 @@ if __name__ == '__main__':
 
             noise_spectral_dens = 1/snr_linear
 
-            for i in range(10):
+            for i in range(int(sys.argv[3])): # 10):
                 simulation_data[snr_in_db][i] = {}
                 
                 uncoded = np.random.randint(0, 2, BITS, bool)
@@ -318,12 +329,8 @@ if __name__ == '__main__':
                 noise = sqrt(noise_spectral_dens/2)*np.asarray(randoms)
 
                 received = signal + noise
-
-                demodulated = [1 if r < 0 else 0 for r in received]
-                
-                decoded = []
-                
-                decoded = rsc.decode(demodulated)
+                                
+                decoded = rsc.bcjr_decode(received[0::2], received[1::2], variance=noise_spectral_dens/2)[0]
 
                 n_errors = sum(decoded != uncoded)
                 ber = n_errors/BITS
@@ -345,42 +352,46 @@ if __name__ == '__main__':
     elif sys.argv[1] == 'trellis':
         rsc = RSC(gates, [1], 3, 2, terminate=False)
 
-        random_bits = np.random.randint(0,2,10,bool)
-        print(random_bits)
+        while True:
+
+            random_bits = np.random.randint(0,2,2000,bool)
+            # print(random_bits)
 
 
 
-        coded = rsc.encode(random_bits)
-        print(coded)
+            coded = rsc.encode(random_bits)
+            # print(coded)
 
-        modulated_bits = modulate(coded)
+            modulated_bits = modulate(coded)
 
-        print('Modulated: ', modulated_bits)
-        
+            # print('Modulated: ', modulated_bits)
+            
 
-        systematic = modulated_bits[::2]
-        parity = modulated_bits[1::2]
+            systematic = modulated_bits[::2]
+            parity = modulated_bits[1::2]
 
-        decoded = rsc.bcjr_decode(systematic, parity)
+            output = rsc.bcjr_decode(systematic, parity)
+            decoded = output[0]
+            # print(output[1])
 
-        print(decoded)
+            # print(decoded)
 
-        def pairwise_compare(a: list, b: list):
-            for x, y in zip(a, b):
-                if x != y: return False
+            def pairwise_compare(a: list, b: list):
+                for x, y in zip(a, b):
+                    if x != y: return False
 
-            return True
+                return True
 
-        if pairwise_compare(random_bits, decoded):
-            print('We have correct sequence!')
+            if not pairwise_compare(random_bits, decoded):
+                print('We don\'t have correct sequence!')
 
     if sys.argv[1] == 'bcjr' or sys.argv[1] == 'viterbi':
         if not os.path.exists('rsc'):
                 os.makedirs('rsc')
 
-        with open(f'rsc/rsc_{sys.argv[1]}_aggregated_bers_{end}.csv', mode='w') as file:
+        with open(f'rsc/rsc_{sys.argv[1]}_aggregated_bers_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{end}.csv', mode='w') as file:
                 writer = csv.writer(file)
                 writer.writerows(map(lambda x: [x], bers))
 
-        with open(f'rsc/rsc_{sys.argv[1]}_raw_data_{end}.json', mode='w') as file:
+        with open(f'rsc/rsc_{sys.argv[1]}_raw_data_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{end}.json', mode='w') as file:
             json.dump(simulation_data, file)
