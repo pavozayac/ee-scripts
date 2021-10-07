@@ -1,5 +1,5 @@
+import math
 from numpy import random
-from numpy.lib.arraysetops import isin
 from convolutional import ConvCode, chunks
 import os
 from typing import Callable, Dict, List, Optional, Tuple
@@ -32,36 +32,44 @@ def modulate(a: bool) -> float:
         return [1-2*float(b) for b in a]
 
 #This gamma is defined specifically for BPSK modulation
-def compute_gamma(signal: float, parity: float, prototype_output: List[float], a_priori = 0.5, No = 2) -> float:
+def compute_gamma(signal: float, parity: float, prototype_output: List[float], a_priori = 0.5, No = 1) -> float:
     # print(signal, parity, prototype_output)
     # return a_priori*np.exp(
     #     -1*((signal-prototype_output[0])**2 + (parity-prototype_output[1])**2)/2/variance
     # )
 
-    return 2/No*(prototype_output[0]*signal+prototype_output[1]*parity) + np.log(a_priori)
+    return prototype_output[0]*signal+prototype_output[1]*parity #+ 0.5*signal*np.log(1)
 
-def max_star(x, y):
-    return max(x, y) + np.log(1 + np.exp(-1*np.abs(y-x)))
+def max_star(values: list):
+    values = values.copy()
+    buffer = values[0]
+    for value in values[1:]:
+        if value == float('-inf'):
+            buffer = buffer
+        else:
+            buffer = max(buffer, value) + np.log(1 + math.e**(-np.abs(value-buffer)))
+
+    return buffer
+    
 
 
 class RSC(ConvCode):
     # RSC should always have one gate less than its output
 
-    def __init__(self, gates, recursive_indices: List[int], reg_size = 3, out_size = 2, mode = RSCMode.SYSTEMATIC, terminate = False, decoder = RSCDecoder.VITERBI):
+    def __init__(self, gates, recursive_indices: List[int], reg_size = 3, out_size = 2, terminate = False, decoder = RSCDecoder.VITERBI):
         self.trellis = {}
         self.reg_size = reg_size
         self.out_size = out_size
         self.gates = gates
         self.register = [False]*reg_size
         self.recursive_indices = recursive_indices
-        self.mode = mode
         self.terminate = terminate
         self.decoder = decoder
 
-        if decoder == RSCDecoder.VITERBI:
-            self.fill_trellis()
-        else:
-            self.fill_trellis_bcjr()
+        #if decoder == RSCDecoder.VITERBI:
+        self.fill_trellis_a()
+        #else:
+            #self.fill_trellis_bcjr()
 
     def fill_trellis_bcjr(self):
         posregs = product([modulate(False), modulate(True)], repeat=self.reg_size)
@@ -78,6 +86,35 @@ class RSC(ConvCode):
                     'next_state': tuple(self.register),
                     'output': output
                 }
+
+    def fill_trellis_a(self):
+        posregs = product([False, True], repeat=self.reg_size)
+
+        previous_to_fill = []
+
+        for reg in posregs:
+            self.trellis[reg] = {}
+            self.trellis[reg]['previous_state'] = []
+            self.trellis[reg]['bit_to_state'] = reg[-1]
+
+            for next_bit in [False, True]:
+                self.register = list(reg).copy()
+
+                output = self.push_reg(next_bit)
+
+                self.trellis[reg][next_bit] = {
+                    'next_state': tuple(self.register),
+                    'output': output
+                }
+
+                previous_to_fill.append({
+                    'state': tuple(self.register),
+                    'previous_bit': next_bit,
+                    'previous_state': reg
+                })
+
+        for previous in previous_to_fill:
+            self.trellis[previous['state']]['previous_state'].append(previous['previous_state'])
 
     def push_reg(self, bit: bool):
         recursive_bit = bit
@@ -105,10 +142,8 @@ class RSC(ConvCode):
 
         return output
 
-    
-
     #takes a list of floating-point numbers and returns the log likelihood ratio, optionally takes a list of previous LLRs
-    def bcjr_decode(self, systematic_sequence: List[float], parity_sequence: List[float], llrs: Optional[List[float]] = None, variance = 1) -> List[float]:
+    def bcjr_decode(self, systematic_sequence: List[float], parity_sequence: List[float], llrs: Optional[List[float]] = None, No = 1) -> List[float]:
 
         @dataclass
         class TimeslotState():
@@ -125,101 +160,151 @@ class RSC(ConvCode):
 
         nodes: List[Dict[List[bool], TimeslotState]] = []
 
-        # nodes.append({
-        #     tuple([modulate(False)]*self.reg_size): {
-        #         'alpha': 0,
-        #         'beta': 0,
-        #         'gamma_to_next': 0,
-        #         'transition_bit': None,
-        #         'previous': None,
-        #         'output': None
-        #     }
-        # })
-
-        
-
         for _ in range(len(systematic_sequence)+1):
             timeslot = {}
 
             for state in product([False, True], repeat=self.reg_size):
-                timeslot[tuple(state)] = TimeslotState(0, 0, {
+                # print(state)
+                timeslot[tuple(state)] = TimeslotState(float('-inf'), float('-inf'), {
                     False: 0,
                     True: 0
                 })
             nodes.append(timeslot)
 
-        nodes[0][tuple([False]*self.reg_size)].alpha = 1.0
+        nodes[0][tuple([False]*self.reg_size)].alpha = np.log(1.0)
 
         # The guarantee of all-zero final state
         if self.terminate == True:
-            nodes[-1][tuple([False]*self.reg_size)].beta = 1.0
+            nodes[-1][tuple([False]*self.reg_size)].beta = np.log(1.0)
         else:
             for memory, node in nodes[-1].items():
-                node.beta = 1/(2**self.reg_size)
+                node.beta = np.log(1/(2**self.reg_size))
+
         # Gamma computation
         t = 0
         for timeslot in nodes[:-1]:
             for memory, node in timeslot.items():
                 for next_bit in [False, True]:
-                    local_gamma = compute_gamma(systematic_sequence[t], parity_sequence[t], modulate(self.trellis[memory][next_bit]['output']))
+                    #print(self.trellis[memory][next_bit]['output'], modulate(self.trellis[memory][next_bit]['output']))
+                    local_gamma = compute_gamma(systematic_sequence[t], parity_sequence[t], modulate(self.trellis[memory][next_bit]['output']), No = No)
                     
-                    node.gamma[next_bit] = local_gamma
+                    timeslot[memory].gamma[next_bit] = local_gamma
             t += 1
+
+        # print(nodes)
 
         # Forward recursion
         t = 1
         for timeslot in nodes[1:]:
             for memory, node in timeslot.items():
-                previous_registers = self.trellis[memory]['previous_state']
+                previous_states = self.trellis[memory]['previous_state']
                 bit_to_state = self.trellis[memory]['bit_to_state']
-                previous_node_1 = nodes[t-1][previous_registers[0]]
-                previous_node_2 = nodes[t-1][previous_registers[1]]
-                
-                alpha = max_star(previous_node_1.alpha+previous_node_1.gamma[bit_to_state],  previous_node_2.alpha+previous_node_2.gamma[bit_to_state])
+                previous_node_1 = nodes[t-1][previous_states[0]]
+                previous_node_2 = nodes[t-1][previous_states[1]]
 
-                node.alpha = alpha
+                # print(previous_node_1)
+                # print(previous_node_2)
+                
+                alpha = max_star([previous_node_1.alpha+previous_node_1.gamma[bit_to_state], previous_node_2.alpha+previous_node_2.gamma[bit_to_state]])
+
+                timeslot[memory].alpha = alpha
+
+            # total = max_star([node.alpha for memory, node in timeslot.items()])
+            # for memory, node in timeslot.items():
+            #     node.alpha = node.alpha - total
 
             t += 1
 
         # Backward recursion
-        t = len(nodes)-2
-        for timeslot in nodes[-2::-1]:
-            # print(t)
-            for memory, node in timeslot.items():
-                beta = 0
+        # t = len(nodes)-2
+        # for timeslot in nodes[-2:-1]:
+        #     # print(t)
+        #     for memory, node in timeslot.items():
+        #         betas = []
 
-                for bit in [False, True]:
-                    next_register = self.trellis[memory][bit]['next_state']
-                    beta = max_star(nodes[t+1][next_register].beta+node.gamma[bit], beta)
+        #         for bit in [False, True]:
+        #             next_register = self.trellis[memory][bit]['next_state']
+        #             beta_component = nodes[t+1][next_register].beta
+        #             betas.append(beta_component+node.gamma[bit])
+
+        #         # print(betas)
+
+        #         beta = max_star(betas)
                 
-                node.beta = beta
+        #         # node.beta = beta
 
-            t -= 1
-        # Computation of Log Likelihood Ratios
+        #         nodes[t][memory].beta = beta
+
+        #     # total = max_star([node.beta for memory, node in timeslot.items()])
+
+        #     # for memory, node in timeslot.items():
+        #     #     node.beta = node.beta - total
+            
+
+        #     t -= 1
+
+        for t in range(len(nodes)-2,0,-1):
+            timeslot = nodes[t]
+
+            for memory in timeslot:
+                betas = []
+
+                for next_beta_bit in [False, True]:
+                    next_register = self.trellis[memory][next_beta_bit]['next_state']
+                    beta_component = nodes[t+1][next_register].beta
+                    betas.append(beta_component+timeslot[memory].gamma[next_beta_bit])
+
+                timeslot[memory].beta = max_star(betas)
+        
         llrs = []
-        t = 0
-        for timeslot in nodes[:-1]:
-            # max_1 = max_star()
-            top = 0 
-            bottom = 0
+        for time in range(1,len(nodes)):
+            # print(time)
+            timeslot = nodes[time]
+
+            ones = []
+            zeros = []
+
             for memory, node in timeslot.items():
-                alpha = node.alpha
-                beta_one = nodes[t+1][self.trellis[memory][True]['next_state']].beta
-                beta_zero = nodes[t+1][self.trellis[memory][False]['next_state']].beta
-                top += alpha * beta_one * node.gamma[True]
-                bottom += alpha * beta_zero * node.gamma[False]
+                #for next_bit in [False, True]:
+                # previous_1 = self.trellis[memory]['previous_state'][0]
+                # previous_2 = self.trellis[memory]['previous_state'][1]                        
+                beta_local = timeslot[memory].beta
+                to_state = self.trellis[memory]['bit_to_state']
+                for previous_memory in self.trellis[memory]['previous_state']:
+                    alpha1 = nodes[time-1][previous_memory].alpha
+                    gamma1 = nodes[time-1][previous_memory].gamma[to_state]
+                    # print(alpha1, beta_local, gamma1, alpha1 + beta_local + gamma1)
 
-            llrs.append(np.log(top/bottom))
 
-            t += 1
+                    #print(alpha1, beta_local)
+
+                    # if alpha1 == float('-inf') or beta_local == float('-inf'):
+                    #     print('skip')
+                    #     continue
+                
+                    if to_state == True:
+                        #print(True)
+                        ones.append(alpha1 + beta_local + gamma1)
+                    else:
+                        #print(False)
+                        zeros.append(alpha1 + beta_local + gamma1)
+                        #zeros.append(alpha2 + beta_local + gamma2)
+            # print('Ones:', ones)
+            # print('Zeros:', zeros)
+            one = max_star(ones)
+            zero = max_star(zeros)
+            llrs.append(one-zero)
+            
+        # print(nodes)
 
         # print(llrs)
 
-        # print(nodes)
+        for llr in llrs:
+            if llr == 0: print('wth')
 
         decoded_sequence = [True if llr > 0 else False for llr in llrs]
 
-        return decoded_sequence, llrs
+        return decoded_sequence, llrs   
 
 
 def gates(register: List[bool]):
@@ -294,11 +379,11 @@ if __name__ == '__main__':
         print(bers)
 
     elif sys.argv[1] == 'bcjr':
-        rsc = RSC(gates, [1], 3, 2)
+        rsc = RSC(gates, [1, 2], 3, 2, terminate=False)
 
         BITS = int(sys.argv[2]) # 10000
 
-        snr_in_db_range = np.arange(0, 9, 0.5)
+        snr_in_db_range = np.arange(0, 10, 0.5)
 
         start = time.time()
 
@@ -311,7 +396,8 @@ if __name__ == '__main__':
 
             snr_linear = 10**(snr_in_db/10)
 
-            noise_spectral_dens = 1/snr_linear
+            # noise_spectral_dens = 1/snr_linear
+            noise_variance = 0.5/snr_linear
 
             for i in range(int(sys.argv[3])): # 10):
                 simulation_data[snr_in_db][i] = {}
@@ -320,19 +406,19 @@ if __name__ == '__main__':
 
                 msg = rsc.encode(uncoded)
 
-                signal = 1 - 2*np.asarray(msg)
+                signal = modulate(msg)
 
-                print('n0', noise_spectral_dens)
+                print('n0', noise_variance)
 
                 randoms = [box_muller() for _ in range(len(msg))]
 
-                noise = sqrt(noise_spectral_dens/2)*np.asarray(randoms)
+                noise = sqrt(noise_variance)*np.asarray(randoms)
 
                 received = signal + noise
                                 
-                decoded = rsc.bcjr_decode(received[0::2], received[1::2], variance=noise_spectral_dens/2)[0]
+                decoded = rsc.bcjr_decode(received[0::2], received[1::2], No=noise_variance)[0]
 
-                n_errors = sum(decoded != uncoded)
+                n_errors = sum(1 if a != b else 0 for a, b in zip(decoded, uncoded))
                 ber = n_errors/BITS
 
                 simulation_data[snr_in_db][i]['number_of_errors'] = int(n_errors)
@@ -350,40 +436,46 @@ if __name__ == '__main__':
     
 
     elif sys.argv[1] == 'trellis':
-        rsc = RSC(gates, [1], 3, 2, terminate=False)
+        rsc = RSC(gates, [1, 2], 3, 2, terminate=False)
 
-        while True:
+        # print(rsc.trellis)
+        #while True:
 
-            random_bits = np.random.randint(0,2,2000,bool)
-            # print(random_bits)
+        random_bits = np.random.randint(0,2,100,bool)
 
 
 
-            coded = rsc.encode(random_bits)
-            # print(coded)
+        coded = rsc.encode(random_bits)
+        # print(coded)
 
-            modulated_bits = modulate(coded)
+        modulated_bits = modulate(coded)
+        #modulated_bits[2] -= 2
 
-            # print('Modulated: ', modulated_bits)
-            
+        # print('Modulated: ', modulated_bits)
+        
 
-            systematic = modulated_bits[::2]
-            parity = modulated_bits[1::2]
+        systematic = modulated_bits[::2]
+        parity = modulated_bits[1::2]
 
-            output = rsc.bcjr_decode(systematic, parity)
-            decoded = output[0]
-            # print(output[1])
+        output = rsc.bcjr_decode(systematic, parity)
+        decoded = output[0]
+        # print(output[1])
 
-            # print(decoded)
+        # print(decoded)
 
-            def pairwise_compare(a: list, b: list):
-                for x, y in zip(a, b):
-                    if x != y: return False
+        def pairwise_compare(a: list, b: list):
+            for x, y in zip(a, b):
+                if x != y: return False
 
-                return True
+            return True
 
-            if not pairwise_compare(random_bits, decoded):
-                print('We don\'t have correct sequence!')
+        if not pairwise_compare(random_bits, decoded):
+            print('We don\'t have correct sequence!')
+        print(random_bits)
+        print(coded)
+        print(decoded)
+        print(modulated_bits)
+
 
     if sys.argv[1] == 'bcjr' or sys.argv[1] == 'viterbi':
         if not os.path.exists('rsc'):
