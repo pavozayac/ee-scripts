@@ -5,29 +5,33 @@ from sys import argv
 from csv import reader
 
 
-filename = argv[1]
-snr_in_db_range = arange(0, 9, 0.5)
+filenames = argv[1:-1]
+snr_in_db_range = arange(0, int(argv[-1]), 0.5)
 
-with open(filename, newline='\n') as file:
-    plot.figure()
-    plot.subplot()
-    plot.xlabel(r'$E_b/N_0$ (dB)')
-    plot.ylabel('BER')
-    plot.yscale('log')
-    plot.xscale('linear')
+plot.figure()
+plot.subplot()
+plot.xlabel(r'$E_b/N_0$ (dB)')
+plot.ylabel('BER')
 
-    ber_reader = reader(file, delimiter=' ')
+for filename in filenames:
+    with open(filename, newline='\n') as file:
+        
+        plot.yscale('log')
+        plot.xscale('linear')
 
-    bers = []
+        ber_reader = reader(file, delimiter=' ')
 
-    for row in ber_reader:
-        print(row[0])
-        bers.append(float(row[0]))
+        bers = []
 
-    print(bers)
+        for row in list(ber_reader)[:int(argv[-1])*2]:
+            print(row)
+            print(row[0])
+            bers.append(float(row[0]))
 
-    plot.plot(snr_in_db_range, bers, label=filename)
+        print(bers)
 
-    plot.title('BER in the BPSK modulated AWGN channel')
-    plot.legend()
-    plot.show()
+        plot.plot(snr_in_db_range, bers, label=filename)
+
+plot.title('BER in the BPSK modulated AWGN channel')
+plot.legend()
+plot.show()

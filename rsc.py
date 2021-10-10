@@ -17,6 +17,19 @@ import sys
 import datetime
 from dataclasses import dataclass
 
+def flatten(list_like):
+    if isinstance(list_like, (list, tuple, set, range)):
+        for sub in list_like:
+            yield from flatten(sub)
+    else:
+        yield list_like
+
+def pairwise_compare(a: list, b: list):
+    for x, y in zip(a, b):
+        if x != y: return False
+
+    return True
+
 class RSCMode(Enum):
     SYSTEMATIC = 'systematic'
     NONSYSTEMATIC = 'nonsystematic'
@@ -27,18 +40,10 @@ class RSCDecoder(Enum):
 
 def modulate(a: bool) -> float:
     if isinstance(a, bool):
-        return 1 - 2*float(a)
+        return 2*float(a)-1
     else:
-        return [1-2*float(b) for b in a]
+        return [2*float(b)-1 for b in a]
 
-#This gamma is defined specifically for BPSK modulation
-def compute_gamma(signal: float, parity: float, prototype_output: List[float], a_priori = 0.5, No = 1) -> float:
-    # print(signal, parity, prototype_output)
-    # return a_priori*np.exp(
-    #     -1*((signal-prototype_output[0])**2 + (parity-prototype_output[1])**2)/2/variance
-    # )
-
-    return prototype_output[0]*signal+prototype_output[1]*parity #+ 0.5*signal*np.log(1)
 
 def max_star(values: list):
     values = values.copy()
@@ -65,27 +70,23 @@ class RSC(ConvCode):
         self.recursive_indices = recursive_indices
         self.terminate = terminate
         self.decoder = decoder
+        self.snr = None
 
         #if decoder == RSCDecoder.VITERBI:
         self.fill_trellis_a()
         #else:
             #self.fill_trellis_bcjr()
 
+    def set_snr(self, snr):
+        self.snr = snr
+
     def fill_trellis_bcjr(self):
         posregs = product([modulate(False), modulate(True)], repeat=self.reg_size)
 
         for reg in posregs:
-            self.trellis[reg] = {}
+            prepared = reg + [False]*3
+            
 
-            for next_bit in [modulate(False), modulate(True)]:
-                self.register = list(reg).copy()
-
-                output = self.push_reg(next_bit)
-
-                self.trellis[reg][next_bit] = {
-                    'next_state': tuple(self.register),
-                    'output': output
-                }
 
     def fill_trellis_a(self):
         posregs = product([False, True], repeat=self.reg_size)
@@ -100,7 +101,7 @@ class RSC(ConvCode):
             for next_bit in [False, True]:
                 self.register = list(reg).copy()
 
-                output = self.push_reg(next_bit)
+                output = self._push_reg(next_bit)
 
                 self.trellis[reg][next_bit] = {
                     'next_state': tuple(self.register),
@@ -115,16 +116,29 @@ class RSC(ConvCode):
 
         for previous in previous_to_fill:
             self.trellis[previous['state']]['previous_state'].append(previous['previous_state'])
-
-    def push_reg(self, bit: bool):
+    
+    def _push_reg(self, bit: bool):
         recursive_bit = bit
         
         for i in self.recursive_indices:
-            recursive_bit = recursive_bit != self.register[i]
+            recursive_bit = recursive_bit ^ self.register[i]
 
         self.register = self.register[1:] + [recursive_bit]
         output = [bit] + self.gates(self.register)
         return output
+
+    def push_reg(self, bit: bool):
+        # recursive_bit = bit
+        
+        # for i in self.recursive_indices:
+        #     recursive_bit = recursive_bit ^ self.register[i]
+
+        # self.register = self.register[1:] + [recursive_bit]
+        # output = [bit] + self.gates(self.register)
+        output = self.trellis[tuple(self.register)][bit]['output']
+        self.register = self.trellis[tuple(self.register)][bit]['next_state']
+        return output
+
 
     def encode(self, bits: List[bool]) -> List[bool]:
         self.register = [False]*self.reg_size
@@ -136,14 +150,33 @@ class RSC(ConvCode):
 
         if self.terminate == True:
             for _ in range(self.reg_size):
-                output += self.push_reg(self.register[self.recursive_indices[0]])
+                termination_bit = self.register[self.recursive_indices[0]]
+
+                for index in self.recursive_indices[1:]:
+                    termination_bit = termination_bit ^ self.register[index]
+
+                output += self.push_reg(termination_bit)
+                print(termination_bit)
+                print(self.register)
+
 
         # print(self.register)
 
         return output
 
+    #This gamma is defined specifically for BPSK modulation
+    def compute_gamma(self, signal: float, parity: float, prototype_output: List[float], a_priori_log = None) -> float:
+        if a_priori_log:
+            # print((prototype_output[1]*a_priori_log)/2)
+            # print('we have a priori', (0.5)*prototype_output[0]*a_priori_log)
+            return (self.Lc/2)*(prototype_output[0]*signal+prototype_output[1]*parity) + (prototype_output[0]*a_priori_log)
+        else: 
+            return (self.Lc/2)*(prototype_output[0]*signal+prototype_output[1]*parity)
+
+    
     #takes a list of floating-point numbers and returns the log likelihood ratio, optionally takes a list of previous LLRs
-    def bcjr_decode(self, systematic_sequence: List[float], parity_sequence: List[float], llrs: Optional[List[float]] = None, No = 1) -> List[float]:
+    def bcjr_decode(self, systematic_sequence: List[float], parity_sequence: List[float], Le: Optional[List[float]] = None) -> List[float]:
+        self.Lc = 2*self.snr
 
         @dataclass
         class TimeslotState():
@@ -186,12 +219,14 @@ class RSC(ConvCode):
             for memory, node in timeslot.items():
                 for next_bit in [False, True]:
                     #print(self.trellis[memory][next_bit]['output'], modulate(self.trellis[memory][next_bit]['output']))
-                    local_gamma = compute_gamma(systematic_sequence[t], parity_sequence[t], modulate(self.trellis[memory][next_bit]['output']), No = No)
+                    local_gamma = self.compute_gamma(
+                        systematic_sequence[t], parity_sequence[t], 
+                        modulate(self.trellis[memory][next_bit]['output']), 
+                        a_priori_log=Le[t] if Le else None
+                    )
                     
                     timeslot[memory].gamma[next_bit] = local_gamma
             t += 1
-
-        # print(nodes)
 
         # Forward recursion
         t = 1
@@ -209,40 +244,9 @@ class RSC(ConvCode):
 
                 timeslot[memory].alpha = alpha
 
-            # total = max_star([node.alpha for memory, node in timeslot.items()])
-            # for memory, node in timeslot.items():
-            #     node.alpha = node.alpha - total
-
             t += 1
 
         # Backward recursion
-        # t = len(nodes)-2
-        # for timeslot in nodes[-2:-1]:
-        #     # print(t)
-        #     for memory, node in timeslot.items():
-        #         betas = []
-
-        #         for bit in [False, True]:
-        #             next_register = self.trellis[memory][bit]['next_state']
-        #             beta_component = nodes[t+1][next_register].beta
-        #             betas.append(beta_component+node.gamma[bit])
-
-        #         # print(betas)
-
-        #         beta = max_star(betas)
-                
-        #         # node.beta = beta
-
-        #         nodes[t][memory].beta = beta
-
-        #     # total = max_star([node.beta for memory, node in timeslot.items()])
-
-        #     # for memory, node in timeslot.items():
-        #     #     node.beta = node.beta - total
-            
-
-        #     t -= 1
-
         for t in range(len(nodes)-2,0,-1):
             timeslot = nodes[t]
 
@@ -264,47 +268,36 @@ class RSC(ConvCode):
             ones = []
             zeros = []
 
-            for memory, node in timeslot.items():
-                #for next_bit in [False, True]:
-                # previous_1 = self.trellis[memory]['previous_state'][0]
-                # previous_2 = self.trellis[memory]['previous_state'][1]                        
+            for memory, node in timeslot.items():                       
                 beta_local = timeslot[memory].beta
-                to_state = self.trellis[memory]['bit_to_state']
+                to_state = self.trellis[memory]['bit_to_state'] 
                 for previous_memory in self.trellis[memory]['previous_state']:
                     alpha1 = nodes[time-1][previous_memory].alpha
                     gamma1 = nodes[time-1][previous_memory].gamma[to_state]
-                    # print(alpha1, beta_local, gamma1, alpha1 + beta_local + gamma1)
-
-
-                    #print(alpha1, beta_local)
-
-                    # if alpha1 == float('-inf') or beta_local == float('-inf'):
-                    #     print('skip')
-                    #     continue
                 
                     if to_state == True:
-                        #print(True)
                         ones.append(alpha1 + beta_local + gamma1)
                     else:
-                        #print(False)
                         zeros.append(alpha1 + beta_local + gamma1)
-                        #zeros.append(alpha2 + beta_local + gamma2)
-            # print('Ones:', ones)
-            # print('Zeros:', zeros)
             one = max_star(ones)
             zero = max_star(zeros)
             llrs.append(one-zero)
             
-        # print(nodes)
-
-        # print(llrs)
-
         for llr in llrs:
             if llr == 0: print('wth')
 
         decoded_sequence = [True if llr > 0 else False for llr in llrs]
+        if self.terminate == True:
+            decoded_sequence = decoded_sequence[0:-3]
 
-        return decoded_sequence, llrs   
+        if Le == None:
+            extrinsic_llrs = [(computed_llr - self.Lc*rec_sys) for computed_llr, rec_sys in zip(llrs, systematic_sequence)]
+        else:
+            extrinsic_llrs = [(computed_llr - (self.Lc*rec_sys + ext)) for computed_llr, rec_sys, ext in zip(llrs, systematic_sequence, Le)]
+        # print('Le: ', extrinsic_llrs)
+        # print('LLR: ', llrs)
+
+        return decoded_sequence, extrinsic_llrs, llrs
 
 
 def gates(register: List[bool]):
@@ -325,7 +318,7 @@ if __name__ == '__main__':
 
         BITS = 10000 * 100
 
-        snr_in_db_range = np.arange(0, 9, 0.5)
+        snr_in_db_range = np.arange(0, 8, 0.5)
 
         start = time.time()
 
@@ -383,7 +376,7 @@ if __name__ == '__main__':
 
         BITS = int(sys.argv[2]) # 10000
 
-        snr_in_db_range = np.arange(0, 10, 0.5)
+        snr_in_db_range = np.arange(0, 8, 0.5)
 
         start = time.time()
 
@@ -416,7 +409,7 @@ if __name__ == '__main__':
 
                 received = signal + noise
                                 
-                decoded = rsc.bcjr_decode(received[0::2], received[1::2], No=noise_variance)[0]
+                decoded = rsc.bcjr_decode(received[0::2], received[1::2])[0]
 
                 n_errors = sum(1 if a != b else 0 for a, b in zip(decoded, uncoded))
                 ber = n_errors/BITS
@@ -441,12 +434,13 @@ if __name__ == '__main__':
         # print(rsc.trellis)
         #while True:
 
-        random_bits = np.random.randint(0,2,100,bool)
+        random_bits = np.random.randint(0,2,10,bool)
 
 
 
         coded = rsc.encode(random_bits)
-        # print(coded)
+        print(coded, len(coded))
+        print('Reg:', rsc.register)
 
         modulated_bits = modulate(coded)
         #modulated_bits[2] -= 2
@@ -463,11 +457,7 @@ if __name__ == '__main__':
 
         # print(decoded)
 
-        def pairwise_compare(a: list, b: list):
-            for x, y in zip(a, b):
-                if x != y: return False
-
-            return True
+        
 
         if not pairwise_compare(random_bits, decoded):
             print('We don\'t have correct sequence!')
@@ -481,9 +471,9 @@ if __name__ == '__main__':
         if not os.path.exists('rsc'):
                 os.makedirs('rsc')
 
-        with open(f'rsc/rsc_{sys.argv[1]}_aggregated_bers_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{end}.csv', mode='w') as file:
+        with open(f'rsc/rsc_{sys.argv[1]}_aggregated_bers_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
                 writer = csv.writer(file)
                 writer.writerows(map(lambda x: [x], bers))
 
-        with open(f'rsc/rsc_{sys.argv[1]}_raw_data_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{end}.json', mode='w') as file:
+        with open(f'rsc/rsc_{sys.argv[1]}_raw_data_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
             json.dump(simulation_data, file)
