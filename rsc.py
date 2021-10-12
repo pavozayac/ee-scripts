@@ -115,16 +115,28 @@ class RSC(ConvCode):
                 })
 
         for previous in previous_to_fill:
-            self.trellis[previous['state']]['previous_state'].append(previous['previous_state'])
+            self.trellis[previous['state']]['previous_state'].append({
+                    'register': previous['previous_state'],
+                    'bit_to_state': previous['previous_bit']
+                }
+            )
+
+        print(self.trellis)
     
     def _push_reg(self, bit: bool):
         recursive_bit = bit
-        
+
+        last_bit = self.register[0]
+
         for i in self.recursive_indices:
             recursive_bit = recursive_bit ^ self.register[i]
 
         self.register = self.register[1:] + [recursive_bit]
-        output = [bit] + self.gates(self.register)
+ 
+        
+
+        output = [bit] + self.gates([last_bit] + self.register)
+
         return output
 
     def push_reg(self, bit: bool):
@@ -143,7 +155,7 @@ class RSC(ConvCode):
     def encode(self, bits: List[bool]) -> List[bool]:
         self.register = [False]*self.reg_size
 
-        output: List[int] = []
+        output: List[bool] = []
 
         for bit in bits:
             output += self.push_reg(bit)
@@ -169,7 +181,7 @@ class RSC(ConvCode):
         if a_priori_log:
             # print((prototype_output[1]*a_priori_log)/2)
             # print('we have a priori', (0.5)*prototype_output[0]*a_priori_log)
-            return (self.Lc/2)*(prototype_output[0]*signal+prototype_output[1]*parity) + (prototype_output[0]*a_priori_log)
+            return (self.Lc/2)*(prototype_output[0]*signal+prototype_output[1]*parity) + (prototype_output[0]*a_priori_log)/2
         else: 
             return (self.Lc/2)*(prototype_output[0]*signal+prototype_output[1]*parity)
 
@@ -233,14 +245,15 @@ class RSC(ConvCode):
         for timeslot in nodes[1:]:
             for memory, node in timeslot.items():
                 previous_states = self.trellis[memory]['previous_state']
-                bit_to_state = self.trellis[memory]['bit_to_state']
-                previous_node_1 = nodes[t-1][previous_states[0]]
-                previous_node_2 = nodes[t-1][previous_states[1]]
-
-                # print(previous_node_1)
-                # print(previous_node_2)
-                
-                alpha = max_star([previous_node_1.alpha+previous_node_1.gamma[bit_to_state], previous_node_2.alpha+previous_node_2.gamma[bit_to_state]])
+                #bit_to_state = self.trellis[memory]['bit_to_state']
+                alphas = []
+                for previous in previous_states:
+                    prev_node = nodes[t-1][previous['register']]
+                    bit_to_state = previous['bit_to_state']
+                    
+                    alphas.append(prev_node.alpha+prev_node.gamma[bit_to_state])
+                    
+                alpha = max_star(alphas)
 
                 timeslot[memory].alpha = alpha
 
@@ -270,12 +283,12 @@ class RSC(ConvCode):
 
             for memory, node in timeslot.items():                       
                 beta_local = timeslot[memory].beta
-                to_state = self.trellis[memory]['bit_to_state'] 
-                for previous_memory in self.trellis[memory]['previous_state']:
-                    alpha1 = nodes[time-1][previous_memory].alpha
-                    gamma1 = nodes[time-1][previous_memory].gamma[to_state]
+                # to_state = self.trellis[memory]['bit_to_state'] 
+                for previous in self.trellis[memory]['previous_state']:
+                    alpha1 = nodes[time-1][previous['register']].alpha
+                    gamma1 = nodes[time-1][previous['register']].gamma[previous['bit_to_state']]
                 
-                    if to_state == True:
+                    if previous['bit_to_state'] == True:
                         ones.append(alpha1 + beta_local + gamma1)
                     else:
                         zeros.append(alpha1 + beta_local + gamma1)
@@ -287,13 +300,12 @@ class RSC(ConvCode):
             if llr == 0: print('wth')
 
         decoded_sequence = [True if llr > 0 else False for llr in llrs]
-        if self.terminate == True:
-            decoded_sequence = decoded_sequence[0:-3]
+     
 
         if Le == None:
             extrinsic_llrs = [(computed_llr - self.Lc*rec_sys) for computed_llr, rec_sys in zip(llrs, systematic_sequence)]
         else:
-            extrinsic_llrs = [(computed_llr - (self.Lc*rec_sys + ext)) for computed_llr, rec_sys, ext in zip(llrs, systematic_sequence, Le)]
+            extrinsic_llrs = [(computed_llr - self.Lc*rec_sys - ext) for computed_llr, rec_sys, ext in zip(llrs, systematic_sequence, Le)]
         # print('Le: ', extrinsic_llrs)
         # print('LLR: ', llrs)
 
@@ -301,7 +313,7 @@ class RSC(ConvCode):
 
 
 def gates(register: List[bool]):
-    return [register[0] ^ register[1] ^ register[2]]
+        return [register[-3] ^ register[-1]]
 
 import json
 import time
@@ -314,9 +326,9 @@ if __name__ == '__main__':
     bers = []
 
     if sys.argv[1] == 'viterbi':
-        rsc = RSC(gates, [1], 3, 2)
+        rsc = RSC(gates, [-2, -1], 2, 2)
 
-        BITS = 10000 * 100
+        BITS = int(sys.argv[2])
 
         snr_in_db_range = np.arange(0, 8, 0.5)
 
@@ -331,9 +343,10 @@ if __name__ == '__main__':
 
             snr_linear = 10**(snr_in_db/10)
 
-            noise_spectral_dens = 1/snr_linear
+            # noise_spectral_dens = 1/snr_linear
+            noise_variance = 0.5/snr_linear
 
-            for i in range(10):
+            for i in range(int(sys.argv[3])):
                 simulation_data[snr_in_db][i] = {}
                 
                 uncoded = np.random.randint(0, 2, BITS, bool)
@@ -342,11 +355,11 @@ if __name__ == '__main__':
 
                 signal = 1 - 2*np.asarray(msg)
 
-                print('n0', noise_spectral_dens)
+                print('n0', noise_variance)
 
                 randoms = [box_muller() for _ in range(len(msg))]
 
-                noise = sqrt(noise_spectral_dens/2)*np.asarray(randoms)
+                noise = sqrt(noise_variance)*np.asarray(randoms)
 
                 received = signal + noise
 
@@ -372,7 +385,7 @@ if __name__ == '__main__':
         print(bers)
 
     elif sys.argv[1] == 'bcjr':
-        rsc = RSC(gates, [1, 2], 3, 2, terminate=False)
+        rsc = RSC(gates, [-2, -1], 2, 2)
 
         BITS = int(sys.argv[2]) # 10000
 
@@ -408,6 +421,8 @@ if __name__ == '__main__':
                 noise = sqrt(noise_variance)*np.asarray(randoms)
 
                 received = signal + noise
+
+                rsc.set_snr(snr_linear)
                                 
                 decoded = rsc.bcjr_decode(received[0::2], received[1::2])[0]
 

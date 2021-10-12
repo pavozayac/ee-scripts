@@ -34,14 +34,21 @@ class TurboCode():
         self.interleaver = interleaver
 
     def encode(self, sequence: List[bool]) -> List[bool]:
-        output1 = chunks(self.code.encode(sequence), 2)
+        output = self.code.encode(sequence)
+        sys = output[::2]
+        parity1 = output[1::2]
 
         interleaved = self.interleaver.interleave(sequence)
-        output2 = self.code.encode(interleaved)[1::2]
+        parity2 = self.code.encode(interleaved)[1::2]
         # print('O2: ', output2)
-        final = list(zip(output1, output2))
+        final = []
+
+        for index, s in enumerate(sys):
+            final.append(s)
+            final.append(parity1[index])
+            final.append(parity2[index]) 
         # print(final)
-        return list(flatten(final))
+        return final
 
     def encode_puncture(self, sequence: List[bool]) -> List[bool]:
         encoded = self.encode(sequence)
@@ -67,26 +74,37 @@ class TurboCode():
         parity2 = sequence[2::3]
         systematic_interleaved = self.interleaver.interleave(systematic)
 
-        extrinsic_llrs_1 = self.code.bcjr_decode(systematic, parity1, a_prioris=None)[1]
+        last_decoded = []
+        arr_1 = []
+        arr_2 = []
+        arr_1.append(self.code.bcjr_decode(systematic, parity1, Le=None)[1])
+        result2 = self.code.bcjr_decode(systematic_interleaved, parity2, Le=self.interleaver.interleave(arr_1[0]))
+        arr_2.append(self.interleaver.deinterleave(result2[1]))
+        last_decoded = self.interleaver.deinterleave(result2[0])
 
-        for _ in range(iterations-1):
-            
-            # print('1: ', extrinsic_llrs_1)
-            extrinsic_llrs_2 = self.interleaver.deinterleave(self.code.bcjr_decode(systematic_interleaved, parity2, a_prioris=self.interleaver.interleave(extrinsic_llrs_1))[1])
-            extrinsic_llrs_1 = self.code.bcjr_decode(systematic, parity1, a_prioris=extrinsic_llrs_2)[1]
-            # print('2: ', extrinsic_llrs_2)
-        
-        decoded_sequence = interleaver.deinterleave(self.code.bcjr_decode(systematic_interleaved, parity2, a_prioris=self.interleaver.interleave(extrinsic_llrs_1))[0])
+        for t in range(0, iterations-1):
 
-        return decoded_sequence
+            arr_1.append(self.code.bcjr_decode(systematic, parity1, Le=arr_2[t])[1])
+            result2 = self.code.bcjr_decode(systematic_interleaved, parity2, Le=self.interleaver.interleave(arr_1[t]))
+            #print('Le of 2: ', result2[1])
+            arr_2.append(self.interleaver.deinterleave(result2[1]))
+            last_decoded = self.interleaver.deinterleave(result2[0])
+        # print('First: ', arr_1)
+        # print('Second: ', arr_2)
+        # for i in range(len(arr_1[0])-1):
+        #     print(arr_1[0][i]-arr_1[1][i])
+
+        return last_decoded
 
     def decode_punctured(self, sequence: List[float], iterations):
         systematic = sequence[0::2]
         parity1 = sequence[1::2][::2]
         parity2 = sequence[1::2][1::2]
+        # print(parity1)
+        # print(parity2)
         systematic_interleaved = self.interleaver.interleave(systematic)
         
-
+        last_decoded = []
         # Filling in punctured spots with 0 values
         parity1 = list(flatten(list(zip(parity1, [0]*len(parity1)))))
         parity2 = list(flatten(list(zip([0]*len(parity2), parity2))))
@@ -96,24 +114,26 @@ class TurboCode():
         arr_1 = []
         arr_2 = []
         arr_1.append(self.code.bcjr_decode(systematic, parity1, Le=None)[1])
-        arr_2.append(self.interleaver.deinterleave(self.code.bcjr_decode(systematic_interleaved, parity2, Le=self.interleaver.interleave(arr_1[0]))[1]))
+        result2 = self.code.bcjr_decode(systematic_interleaved, parity2, Le=self.interleaver.interleave(arr_1[0]))
+        arr_2.append(self.interleaver.deinterleave(result2[1]))
+        last_decoded = self.interleaver.deinterleave(result2[0])
 
         for t in range(0, iterations-1):
 
             arr_1.append(self.code.bcjr_decode(systematic, parity1, Le=arr_2[t])[1])
-            arr_2.append(arr_2.append(self.interleaver.deinterleave(self.code.bcjr_decode(systematic_interleaved, parity2, Le=self.interleaver.interleave(arr_1[t]))[1])))
-            
-        print('First: ', arr_1)
-        print('Second: ', arr_2)
+            result2 = self.code.bcjr_decode(systematic_interleaved, parity2, Le=self.interleaver.interleave(arr_1[t]))
+            # print('Le of 2: ', result2[1])
+            arr_2.append(self.interleaver.deinterleave(result2[1]))
+            last_decoded = self.interleaver.deinterleave(result2[0])
+        # print('First: ', arr_1)
+        # print('Second: ', arr_2)
         # for i in range(len(arr_1[0])-1):
         #     print(arr_1[0][i]-arr_1[1][i])
-
-        decoded_sequence = self.code.bcjr_decode(systematic, parity1, Le=arr_2[-1])[0]
-
-        return decoded_sequence
+        print(last_decoded)
+        return last_decoded
 
 def gates(register: List[bool]):
-    return [register[0] ^ register[1] ^ register[2]]
+    return [register[-3] ^ register[-1]]
 
 if __name__ == '__main__' and sys.argv[-1] == 'test':
     # random_bits = np.random.randint(0, 2, 10, bool)
@@ -129,10 +149,7 @@ if __name__ == '__main__' and sys.argv[-1] == 'test':
     # print(coded)
     # print(decoded)
 
-    def gates(register: List[bool]):
-        return [register[0] ^ register[1] ^ register[2]]
-
-    rsc = RSC(gates, [1, 2], 3, 2)
+    rsc = RSC(gates, [-2, -1], 2, 2)
     #rsc2 = RSC(gates, [1, 2], 3, 2)
     interleaver = Interleaver(int(sys.argv[1]))
 
@@ -158,6 +175,8 @@ if __name__ == '__main__' and sys.argv[-1] == 'test':
     received = modulated + noise
 
     decoded = code.decode_punctured(received, int(sys.argv[2]))
+    print(random_bits)
+    print(decoded)
     n_errors = sum(1 if a != b else 0 for a, b in zip(decoded, random_bits))
     # print(coded)
     # print(decoded)
@@ -175,11 +194,11 @@ if __name__ == '__main__' and sys.argv[-1] == 'simulation':
 
     BITS = int(sys.argv[1]) # 10000
 
-    rsc = RSC(gates, [1, 2], 3, 2, terminate=False)
+    rsc = RSC(gates, [-2, -1], 2, 2)
     interleaver = Interleaver(BITS)
     turbocode = TurboCode(rsc, interleaver)
 
-    snr_in_db_range = np.arange(0, 8 if sys.argv[-3] != 'reduced' else 2, 0.5)
+    snr_in_db_range = np.arange(0, 8 if sys.argv[-3] != 'reduced' else 1, 0.5)
 
     start = time.time()
 
@@ -196,8 +215,9 @@ if __name__ == '__main__' and sys.argv[-1] == 'simulation':
         noise_spectral_dens = 1/snr_linear
         noise_variance = 0.5/snr_linear
 
-        turbocode.code.set_snr(noise_spectral_dens)
+        turbocode.code.set_snr(snr_linear)
 
+        print('n0', noise_variance)
 
         for i in range(int(sys.argv[2])): # 10):
             simulation_data[snr_in_db][i] = {}
@@ -211,7 +231,6 @@ if __name__ == '__main__' and sys.argv[-1] == 'simulation':
 
             signal = modulate(msg)
 
-            print('n0', noise_variance)
 
             randoms = [box_muller() for _ in range(len(msg))]
 
