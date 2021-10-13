@@ -129,7 +129,7 @@ class TurboCode():
         # print('Second: ', arr_2)
         # for i in range(len(arr_1[0])-1):
         #     print(arr_1[0][i]-arr_1[1][i])
-        print(last_decoded)
+        #print(last_decoded)
         return last_decoded
 
 def gates(register: List[bool]):
@@ -198,7 +198,7 @@ if __name__ == '__main__' and sys.argv[-1] == 'simulation':
     interleaver = Interleaver(BITS)
     turbocode = TurboCode(rsc, interleaver)
 
-    snr_in_db_range = np.arange(0, 8 if sys.argv[-3] != 'reduced' else 1, 0.5)
+    snr_in_db_range = np.arange(0 if sys.argv[-3] != 'noisy' else -4, 8 if sys.argv[-3] != 'reduced' else 1, 0.5)
 
     start = time.time()
 

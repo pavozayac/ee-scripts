@@ -6,7 +6,10 @@ from csv import reader
 
 
 filenames = argv[1:-1]
-snr_in_db_range = arange(0, int(argv[-1]), 0.5)
+if argv[-1] == 'noisy':
+    snr_in_db_range = arange(-4, 1, 0.5)
+else:
+    snr_in_db_range = arange(0, int(argv[-1]), 0.5)
 
 plot.figure()
 plot.subplot()
