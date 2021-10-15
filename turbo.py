@@ -198,7 +198,13 @@ if __name__ == '__main__' and sys.argv[-1] == 'simulation':
     interleaver = Interleaver(BITS)
     turbocode = TurboCode(rsc, interleaver)
 
-    snr_in_db_range = np.arange(0 if sys.argv[-3] != 'noisy' else -4, 8 if sys.argv[-3] != 'reduced' else 1, 0.5)
+    top = 0 
+
+    if sys.argv[-3] == 'reduced' or sys.argv[-3] == 'noisy':
+        top = 1
+    else: top = 8
+    
+    snr_in_db_range = np.arange(0 if sys.argv[-3] != 'noisy' else -4, top, 0.5)
 
     start = time.time()
 
