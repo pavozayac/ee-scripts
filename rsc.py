@@ -121,7 +121,7 @@ class RSC(ConvCode):
                 }
             )
 
-        print(self.trellis)
+        # print(self.trellis)
     
     def _push_reg(self, bit: bool):
         recursive_bit = bit

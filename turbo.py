@@ -12,7 +12,7 @@ import time
 from box_muller import box_muller
 from math import sqrt
 import csv
-from interleaver import Interleaver
+from interleaver import Interleaver, SwitchInterleaver
 from rsc import RSC, modulate, pairwise_compare
 import sys
 import json
@@ -67,6 +67,22 @@ class TurboCode():
 
         return output
 
+    def encode_punctured_no_interleave(self, sequence: List[bool]) -> List[bool]:
+        output = self.code.encode(sequence)
+        sys = output[::2]
+        parity = output[1::2]
+
+        # print('O2: ', output2)
+        output = []
+
+        for index, s in enumerate(sys):
+            output.append(s)
+            if index % 2 == 0:
+                output.append(parity[index])
+            else:
+                output.append(parity[index])
+
+        return output
 
     def decode(self, sequence: List[float], iterations):
         systematic = sequence[0::3]
@@ -132,6 +148,40 @@ class TurboCode():
         #print(last_decoded)
         return last_decoded
 
+    def decode_punctured_no_interleave(self, sequence: List[float], iterations):
+        systematic = sequence[0::2]
+        parity1 = sequence[1::2][::2]
+        parity2 = sequence[1::2][1::2]
+        # print(parity1)
+        # print(parity2)        
+        last_decoded = []
+        # Filling in punctured spots with 0 values
+        parity1 = list(flatten(list(zip(parity1, [0]*len(parity1)))))
+        parity2 = list(flatten(list(zip([0]*len(parity2), parity2))))
+
+        # print('p1: ', parity1)
+        # print('p2: ', parity2)
+        arr_1 = []
+        arr_2 = []
+        arr_1.append(self.code.bcjr_decode(systematic, parity1, Le=None)[1])
+        result2 = self.code.bcjr_decode(systematic, parity2, arr_1[0])
+        arr_2.append(result2[1])
+        last_decoded = result2[0]
+
+        for t in range(0, iterations-1):
+
+            arr_1.append(self.code.bcjr_decode(systematic, parity1, Le=arr_2[t])[1])
+            result2 = self.code.bcjr_decode(systematic, parity2, arr_1[t])
+            # print('Le of 2: ', result2[1])
+            arr_2.append(result2[1])
+            last_decoded = result2[0]
+        # print('First: ', arr_1)
+        # print('Second: ', arr_2)
+        # for i in range(len(arr_1[0])-1):
+        #     print(arr_1[0][i]-arr_1[1][i])
+        #print(last_decoded)
+        return last_decoded
+
 def gates(register: List[bool]):
     return [register[-3] ^ register[-1]]
 
@@ -184,6 +234,8 @@ if __name__ == '__main__' and sys.argv[-1] == 'test':
     print('N Errors: ', n_errors)
 
 if __name__ == '__main__' and sys.argv[-1] == 'simulation':
+    print(sys.argv)
+
     simulation_data = {}
     start = 0
     end = 0
@@ -195,7 +247,10 @@ if __name__ == '__main__' and sys.argv[-1] == 'simulation':
     BITS = int(sys.argv[1]) # 10000
 
     rsc = RSC(gates, [-2, -1], 2, 2)
-    interleaver = Interleaver(BITS)
+    if sys.argv[-4] == 'switch':
+        interleaver = SwitchInterleaver(BITS)
+    else:
+        interleaver = Interleaver(BITS)
     turbocode = TurboCode(rsc, interleaver)
 
     top = 0 
@@ -232,6 +287,8 @@ if __name__ == '__main__' and sys.argv[-1] == 'simulation':
 
             if sys.argv[-2] == 'punctured':
                 msg = turbocode.encode_puncture(uncoded)
+            elif sys.argv[-2] == 'punctured_no_interleave':
+                msg = turbocode.encode_punctured_no_interleave(uncoded)
             else:
                 msg = turbocode.encode(uncoded)
 
@@ -246,6 +303,8 @@ if __name__ == '__main__' and sys.argv[-1] == 'simulation':
 
             if sys.argv[-2] == 'punctured':
                 decoded = turbocode.decode_punctured(received, int(sys.argv[3]))
+            elif sys.argv[-2] == 'punctured_no_interleave':
+                decoded = turbocode.decode_punctured_no_interleave(received, int(sys.argv[3]))
             else:
                 decoded = turbocode.decode(received, int(sys.argv[3]))
 
@@ -264,19 +323,21 @@ if __name__ == '__main__' and sys.argv[-1] == 'simulation':
 
     print(bers)
 
+    switch_text = 'switch' if sys.argv[-4] == 'switch' else ''
+
     if not os.path.exists('turbo'):
         os.makedirs('turbo')
     if sys.argv[-2] == 'punctured':
-        with open(f'turbo/punctured_turbo_iter_{sys.argv[3]}_aggregated_bers_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
+        with open(f'turbo/{sys.argv[-2]}_{switch_text}_turbo_iter_{sys.argv[3]}_aggregated_bers_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
             writer = csv.writer(file)
             writer.writerows(map(lambda x: [x], bers))
 
-        with open(f'turbo/punctured_turbo_iter_{sys.argv[3]}_raw_data_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
+        with open(f'turbo/{sys.argv[-2]}_{switch_text}_turbo_iter_{sys.argv[3]}_raw_data_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
             json.dump(simulation_data, file)
     else:
-        with open(f'turbo/turbo_iter_{sys.argv[3]}_aggregated_bers_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
+        with open(f'turbo/{switch_text}_turbo_iter_{sys.argv[3]}_aggregated_bers_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
             writer = csv.writer(file)
             writer.writerows(map(lambda x: [x], bers))
 
-        with open(f'turbo/turbo_iter_{sys.argv[3]}_raw_data_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
+        with open(f'turbo/{switch_text}_turbo_iter_{sys.argv[3]}_raw_data_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
             json.dump(simulation_data, file)    

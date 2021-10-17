@@ -47,8 +47,38 @@ class Interleaver:
             output[index] = sequence[number]
 
         return output
-            
 
+class SwitchInterleaver:
+    def __init__(self, length: int):
+        self.size = length
+
+        self.size = length
+        s = list(range(0, length))
+        self.indices = []
+
+        even = s[::2]
+        odd = s[1::2]
+
+        combined = list(zip(odd, even))
+
+        self.indices = [bit for block in combined for bit in block]
+        
+
+    def interleave(self, sequence: list) -> list:
+        output = []
+
+        for index in self.indices:
+            output.append(sequence[index])
+
+        return output
+
+    def deinterleave(self, sequence: list) -> list:
+        output = [None]*self.size
+
+        for number, index in enumerate(self.indices):
+            output[index] = sequence[number]
+
+        return output
 
 
 
