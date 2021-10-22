@@ -121,19 +121,18 @@ class RSC(ConvCode):
                 }
             )
 
-        # print(self.trellis)
+        print(self.trellis)
     
     def _push_reg(self, bit: bool):
-        recursive_bit = bit
+        recursive_bit = 0
 
         last_bit = self.register[0]
 
         for i in self.recursive_indices:
-            recursive_bit = recursive_bit ^ self.register[i]
+            # NOTE The first input is always added to the recursive registers, so the argument in RSC() cannot be the full feedback polynomial!!!
+            recursive_bit = recursive_bit ^ ([last_bit]+self.register+[bit])[i]
 
         self.register = self.register[1:] + [recursive_bit]
- 
-        
 
         output = [bit] + self.gates([last_bit] + self.register)
 
@@ -312,8 +311,11 @@ class RSC(ConvCode):
         return decoded_sequence, extrinsic_llrs, llrs
 
 
-def gates(register: List[bool]):
-        return [register[-3] ^ register[-1]]
+def gates_1(register: List[bool]):
+    return [register[-1] ^ register[-3] ^ register[-4]]
+
+def gates_2(register: List[bool]):
+    return [register[-1] ^ register[-2] ^ register[-3] ^ register[-4]]
 
 import json
 import time
@@ -325,8 +327,14 @@ if __name__ == '__main__':
 
     bers = []
 
+    if sys.argv[-1] == 'gates_1':
+        rsc = RSC(gates_1, [-1, -2, -3], 3, 2)
+    elif sys.argv[-1] == 'gates_2':
+        rsc = RSC(gates_2, [-1, -2, -4], 3, 2)
+
+
     if sys.argv[1] == 'viterbi':
-        rsc = RSC(gates, [-2, -1], 2, 2)
+        # NOTE !!! The first input is always a part of the recursive encoder, so it CANNOT be here!!!
 
         BITS = int(sys.argv[2])
 
@@ -346,6 +354,8 @@ if __name__ == '__main__':
             # noise_spectral_dens = 1/snr_linear
             noise_variance = 0.5/snr_linear
 
+            print('n0', noise_variance)
+
             for i in range(int(sys.argv[3])):
                 simulation_data[snr_in_db][i] = {}
                 
@@ -354,8 +364,6 @@ if __name__ == '__main__':
                 msg = rsc.encode(uncoded)
 
                 signal = 1 - 2*np.asarray(msg)
-
-                print('n0', noise_variance)
 
                 randoms = [box_muller() for _ in range(len(msg))]
 
@@ -385,8 +393,6 @@ if __name__ == '__main__':
         print(bers)
 
     elif sys.argv[1] == 'bcjr':
-        rsc = RSC(gates, [-2, -1], 2, 2)
-
         BITS = int(sys.argv[2]) # 10000
 
         snr_in_db_range = np.arange(0, 8, 0.5)
@@ -405,6 +411,8 @@ if __name__ == '__main__':
             # noise_spectral_dens = 1/snr_linear
             noise_variance = 0.5/snr_linear
 
+            print('n0', noise_variance)
+
             for i in range(int(sys.argv[3])): # 10):
                 simulation_data[snr_in_db][i] = {}
                 
@@ -414,7 +422,6 @@ if __name__ == '__main__':
 
                 signal = modulate(msg)
 
-                print('n0', noise_variance)
 
                 randoms = [box_muller() for _ in range(len(msg))]
 
@@ -444,7 +451,7 @@ if __name__ == '__main__':
     
 
     elif sys.argv[1] == 'trellis':
-        rsc = RSC(gates, [1, 2], 3, 2, terminate=False)
+        rsc = RSC(gates_1, [1, 2], 3, 2, terminate=False)
 
         # print(rsc.trellis)
         #while True:
@@ -486,9 +493,9 @@ if __name__ == '__main__':
         if not os.path.exists('rsc'):
                 os.makedirs('rsc')
 
-        with open(f'rsc/rsc_{sys.argv[1]}_aggregated_bers_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
+        with open(f'rsc/rsc_{sys.argv[-1]}_{sys.argv[1]}_aggregated_bers_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
                 writer = csv.writer(file)
                 writer.writerows(map(lambda x: [x], bers))
 
-        with open(f'rsc/rsc_{sys.argv[1]}_raw_data_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
+        with open(f'rsc/rsc_{sys.argv[-1]}_{sys.argv[1]}_raw_data_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
             json.dump(simulation_data, file)

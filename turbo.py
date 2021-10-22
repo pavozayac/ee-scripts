@@ -182,8 +182,11 @@ class TurboCode():
         #print(last_decoded)
         return last_decoded
 
-def gates(register: List[bool]):
-    return [register[-3] ^ register[-1]]
+def gates_1(register: List[bool]):
+    return [register[-1] ^ register[-3] ^ register[-4]]
+
+def gates_2(register: List[bool]):
+    return [register[-1] ^ register[-2] ^ register[-3] ^ register[-4]]
 
 if __name__ == '__main__' and sys.argv[-1] == 'test':
     # random_bits = np.random.randint(0, 2, 10, bool)
@@ -199,7 +202,7 @@ if __name__ == '__main__' and sys.argv[-1] == 'test':
     # print(coded)
     # print(decoded)
 
-    rsc = RSC(gates, [-2, -1], 2, 2)
+    rsc = RSC(gates_1, [-3], 2, 2)
     #rsc2 = RSC(gates, [1, 2], 3, 2)
     interleaver = Interleaver(int(sys.argv[1]))
 
@@ -246,7 +249,11 @@ if __name__ == '__main__' and sys.argv[-1] == 'simulation':
 
     BITS = int(sys.argv[1]) # 10000
 
-    rsc = RSC(gates, [-2, -1], 2, 2)
+    if sys.argv[4] == 'gates_1':
+        rsc = RSC(gates_1, [-1, -2, -3], 3, 2)
+    elif sys.argv[4] == 'gates_2':
+        rsc = RSC(gates_2, [-1, -2, -4], 3, 2)
+
     if sys.argv[-4] == 'switch':
         interleaver = SwitchInterleaver(BITS)
     else:
@@ -255,8 +262,10 @@ if __name__ == '__main__' and sys.argv[-1] == 'simulation':
 
     top = 0 
 
-    if sys.argv[-3] == 'reduced' or sys.argv[-3] == 'noisy':
+    if sys.argv[-3] == 'noisy':
         top = 1
+    elif sys.argv[-3] == 'reduced':
+        top = 5
     else: top = 8
     
     snr_in_db_range = np.arange(0 if sys.argv[-3] != 'noisy' else -4, top, 0.5)
@@ -328,16 +337,16 @@ if __name__ == '__main__' and sys.argv[-1] == 'simulation':
     if not os.path.exists('turbo'):
         os.makedirs('turbo')
     if sys.argv[-2] == 'punctured':
-        with open(f'turbo/{sys.argv[-2]}_{switch_text}_turbo_iter_{sys.argv[3]}_aggregated_bers_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
+        with open(f'turbo/{sys.argv[-2]}_{sys.argv[4]}_{switch_text}_turbo_iter_{sys.argv[3]}_aggregated_bers_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
             writer = csv.writer(file)
             writer.writerows(map(lambda x: [x], bers))
 
-        with open(f'turbo/{sys.argv[-2]}_{switch_text}_turbo_iter_{sys.argv[3]}_raw_data_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
+        with open(f'turbo/{sys.argv[-2]}_{sys.argv[4]}_{switch_text}_turbo_iter_{sys.argv[3]}_raw_data_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
             json.dump(simulation_data, file)
     else:
-        with open(f'turbo/{switch_text}_turbo_iter_{sys.argv[3]}_aggregated_bers_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
+        with open(f'turbo/{switch_text}_{sys.argv[4]}_turbo_iter_{sys.argv[3]}_aggregated_bers_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
             writer = csv.writer(file)
             writer.writerows(map(lambda x: [x], bers))
 
-        with open(f'turbo/{switch_text}_turbo_iter_{sys.argv[3]}_raw_data_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
+        with open(f'turbo/{switch_text}_{sys.argv[4]}_turbo_iter_{sys.argv[3]}_raw_data_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
             json.dump(simulation_data, file)    

@@ -46,12 +46,25 @@ class ConvCode:
 
         self.fill_trellis()
 
-    def push_reg(self, bit: bool):
+    def _push_reg(self, bit: bool):
+        last_bit = self.register[0]
+
         self.register = self.register[1:] + [bit]
 
-        output = self.gates(self.register)
+        output = self.gates([last_bit] + self.register)
 
+        return output
 
+    def push_reg(self, bit: bool):
+        # recursive_bit = bit
+        
+        # for i in self.recursive_indices:
+        #     recursive_bit = recursive_bit ^ self.register[i]
+
+        # self.register = self.register[1:] + [recursive_bit]
+        # output = [bit] + self.gates(self.register)
+        output = self.trellis[tuple(self.register)][bit]['output']
+        self.register = self.trellis[tuple(self.register)][bit]['next_state']
         return output
 
     def fill_trellis(self):
@@ -67,7 +80,7 @@ class ConvCode:
             for next_bit in [False, True]:
                 self.register = list(reg).copy()
 
-                output = self.push_reg(next_bit)
+                output = self._push_reg(next_bit)
 
                 self.trellis[reg][next_bit] = {
                     'next_state': tuple(self.register),
@@ -152,7 +165,7 @@ class ConvCode:
             if node['weight'] < survivor_end['weight']:
                 survivor_end = node
 
-        #print(nodes[-1])
+        # print(nodes[-1])
 
         # print(survivor_end)
 
@@ -166,22 +179,26 @@ class ConvCode:
         return reversed_decoded[::-1]
 
         
+def gates_1(input: List[bool]):
+    return [input[-1] ^ input[-3] ^ input[-4], input[-1] ^ input[-2] ^ input[-3]]
 
-
-def half_gates(input: List[bool]):
-    return [input[0] ^ input[1] ^ input[2], input[2]]
+def gates_2(input: List[bool]):
+    return [input[-1] ^ input[-2] ^ input[-3] ^ input[-4], input[-1] ^ input[-2] ^ input[-4]]
 
 if __name__ == '__main__':
-    if sys.argv[1] == 'simulation':
+    if sys.argv[-1] == 'simulation':
         simulation_data = {}
 
         gates = []
-            
-        conv_code = ConvCode(half_gates)
+        
+        if sys.argv[-2] == 'gates_1':
+            conv_code = ConvCode(gates_1, 3)
+        elif sys.argv[-2] == 'gates_2':
+            conv_code = ConvCode(gates_2, 3)
 
-        BITS = 10000 * 100
+        BITS = int(sys.argv[1])
 
-        snr_in_db_range = np.arange(0, 9, 0.5)
+        snr_in_db_range = np.arange(0, 8, 0.5)
 
         bers = []
 
@@ -196,9 +213,12 @@ if __name__ == '__main__':
 
             snr_linear = 10**(snr_in_db/10)
 
-            noise_spectral_dens = 1/snr_linear
+            # noise_spectral_dens = 1/snr_linear
+            noise_variance = 0.5/snr_linear
 
-            for i in range(10):
+            print('n0', noise_variance)
+
+            for i in range(int(sys.argv[2])):
                 simulation_data[snr_in_db][i] = {}
                 
                 uncoded = np.random.randint(0, 2, BITS, bool)
@@ -207,11 +227,9 @@ if __name__ == '__main__':
 
                 signal = 1 - 2*np.asarray(msg)
 
-                print('n0', noise_spectral_dens)
-
                 randoms = [box_muller() for _ in range(len(msg))]
 
-                noise = sqrt(noise_spectral_dens/2)*np.asarray(randoms)
+                noise = sqrt(noise_variance)*np.asarray(randoms)
 
                 received = signal + noise
 
@@ -231,19 +249,20 @@ if __name__ == '__main__':
 
             bers.append(average(local_bers))
         end = time.time()
+        print(bers)
         print('Elapsed: ', end - start)
         
         if not os.path.exists('convolutional'):
             os.makedirs('convolutional')
 
-        with open(f'convolutional/convolutional_aggregated_bers_{end}.csv', mode='w') as file:
+        with open(f'convolutional/convolutional_{sys.argv[-2]}_n_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_aggregated_bers_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
                 writer = csv.writer(file)
                 writer.writerows(map(lambda x: [x], bers))
 
-        with open(f'convolutional/convolutional_raw_data_{end}.json', mode='w') as file:
+        with open(f'convolutional/convolutional_{sys.argv[-2]}_n_bits_{sys.argv[1]}_n_tests_{sys.argv[2]}_raw_data_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
             json.dump(simulation_data, file)
     
-    elif sys.argv[1] == 'trellis':
-        code = ConvCode(half_gates, 3, 2)
+    elif sys.argv[-1] == 'trellis':
+        code = ConvCode(gates_1, 3, 2)
 
         print(code.trellis)
