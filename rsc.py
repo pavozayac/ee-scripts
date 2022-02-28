@@ -337,8 +337,10 @@ if __name__ == '__main__':
         # NOTE !!! The first input is always a part of the recursive encoder, so it CANNOT be here!!!
 
         BITS = int(sys.argv[2])
-
-        snr_in_db_range = np.arange(0, 8, 0.5)
+        if sys.argv[-2] == 'noisy':
+            snr_in_db_range = np.arange(-4, 1, 0.5)
+        else:
+            snr_in_db_range = np.arange(0, 8, 0.5)
 
         start = time.time()
 
@@ -395,7 +397,10 @@ if __name__ == '__main__':
     elif sys.argv[1] == 'bcjr':
         BITS = int(sys.argv[2]) # 10000
 
-        snr_in_db_range = np.arange(0, 8, 0.5)
+        if sys.argv[-2] == 'noisy':
+            snr_in_db_range = np.arange(-4, 1, 0.5)
+        else:
+            snr_in_db_range = np.arange(0, 8, 0.5)
 
         start = time.time()
 
@@ -493,9 +498,9 @@ if __name__ == '__main__':
         if not os.path.exists('rsc'):
                 os.makedirs('rsc')
 
-        with open(f'rsc/rsc_{sys.argv[-1]}_{sys.argv[1]}_aggregated_bers_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
+        with open(f'rsc/rsc_{sys.argv[-2] if sys.argv[-2] == "noisy" else ""}_{sys.argv[-1]}_{sys.argv[1]}_aggregated_bers_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.csv', mode='w') as file:
                 writer = csv.writer(file)
                 writer.writerows(map(lambda x: [x], bers))
 
-        with open(f'rsc/rsc_{sys.argv[-1]}_{sys.argv[1]}_raw_data_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
+        with open(f'rsc/rsc_{sys.argv[-2] if sys.argv[-2] == "noisy" else ""}_{sys.argv[-1]}_{sys.argv[1]}_raw_data_bits_{sys.argv[2]}_n_tests_{sys.argv[3]}_{time.strftime("%m-%d-%Y-%H-%M-%S", time.localtime(end))}.json', mode='w') as file:
             json.dump(simulation_data, file)

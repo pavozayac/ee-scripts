@@ -189,7 +189,10 @@ if __name__ == '__main__':
 
     RS_BITS = int(1000000 - 1000000%7)
 
-    snr_in_db_range = np.arange(0, 9, 0.5)
+    if sys.argv[-1] == 'noisy':
+            snr_in_db_range = np.arange(-4, 1, 0.5)
+    else:
+        snr_in_db_range = np.arange(0, 8, 0.5)
 
     rs_bers = []
 

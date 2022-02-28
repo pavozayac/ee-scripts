@@ -198,7 +198,10 @@ if __name__ == '__main__':
 
         BITS = int(sys.argv[1])
 
-        snr_in_db_range = np.arange(0, 8, 0.5)
+        if sys.argv[-3] == 'noisy':
+            snr_in_db_range = np.arange(-4, 1, 0.5)
+        else:
+            snr_in_db_range = np.arange(0, 8, 0.5)
 
         bers = []
 
